@@ -1,0 +1,214 @@
+---
+title: "mwas test"
+author: "Ciao"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(ggpubr)
+library(ggbiplot) # devtools::install_github("vqv/ggbiplot")
+library(cowplot)
+library(reshape2)
+library(RColorBrewer)
+library(plyr)
+library(dplyr)
+library(vegan)
+library(ape)
+library(pheatmap)
+library(readxl)
+if (!require(devtools)) install.packages("devtools")
+if (!require(ggvenn)) devtools::install_github("yanlinlin82/ggvenn")
+library(ggvenn)
+library(plotly)
+```
+
+# Intro
+
+```{r}
+metadata.df <- read_excel("./TS21-merged-metadata.xlsx","subset",
+                          col_types=c("text","numeric","numeric","numeric",
+                                      "text","text","date","text"),
+                          na="NA")
+
+metadata.df$fmtID <- gsub("-",".",metadata.df$fmtID,fixed = T)
+metadata.df$fmtID <- gsub("[()]","_",metadata.df$fmtID,perl=T)
+metadata.df$Depth <- - metadata.df$Depth
+metadata.df$Collect_date <- as.POSIXlt(metadata.df$Collect_date,
+                                       formats = "%Y-%m-%d")
+
+metadata.df$day <- as.numeric(difftime(metadata.df$Collect_date,"2021-08-21 8:0:0",units="days"))
+```
+
+## No.dive
+```{r}
+fig1 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, color= ~No.dive)
+
+fig1
+```
+## Collector
+```{r}
+fig2 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, color= ~Collector)
+
+fig2
+```
+## day
+```{r}
+fig3 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, 
+                color= ~day)
+
+fig3
+```
+
+## Collect_loc
+```{r}
+metadata.df$Collect_loc.s <- substr(metadata.df$Collect_loc,1,1)
+fig4 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, 
+                color= ~Collect_loc.s)
+
+fig4
+```
+
+# Phylum profile
+
+```{r}
+p.prf <- read.table("./merge.P.pct")
+
+p.shannon <- as.data.frame(diversity(p.prf,MARGIN=2))
+colnames(p.shannon) <- "phylum.shannon"
+p.shannon$fmtID <- rownames(p.shannon)
+
+mdf <-merge(metadata.df,p.shannon,by="fmtID")
+```
+
+```{r}
+fig.p <- plot_ly(mdf, x=~Longitude, y=~Latitude, z= ~ Depth, 
+                color= ~phylum.shannon)
+
+fig.p
+```
+
+# genus profile
+
+```{r}
+g.prf <- read.table("./merge.G.pct")
+g.idx <- read.table("./merge.G.idx",col.names = c("taxid","rank","annotation"))
+
+g.shannon <- as.data.frame(diversity(g.prf,MARGIN=2))
+colnames(g.shannon) <- "genus.shannon"
+g.shannon$fmtID <- rownames(g.shannon)
+
+mdf <-merge(metadata.df,g.shannon,by="fmtID")
+
+```
+
+```{r}
+g.median <- as.data.frame(apply(g.prf,1,median))
+colnames(g.median) <- "median"
+g.median$taxid <- rownames(g.median)
+g.stat <- merge(g.idx,g.median,by="taxid")
+```
+
+```{r}
+options(shiny.maxRequestSize=5000*1024^2)
+pavian::runApp(port=5000)
+```
+
+```{r}
+select.g <- g.stat$taxid[which(g.stat$median>0.1)]
+
+g.prf0 <- g.prf
+g.prf0$taxid <- rownames(g.prf)
+g.df <- melt(g.prf0,id.vars = "taxid",variable.name = "sample",value.name = "pct")
+
+g.df <- g.df%>%filter(taxid%in%select.g)
+g.df <- merge(g.df,g.idx,by="taxid")
+ggplot(g.df,aes(x=annotation,y=pct)) + geom_boxplot() + coord_flip()
+```
+
+```{r}
+ggplot(g.df%>%filter(taxid!=0),aes(x=annotation,y=pct)) + geom_boxplot() + coord_flip() + theme_bw()
+
+```
+
+```{r}
+fig.g <- plot_ly(mdf, x=~Longitude, y=~Latitude, z= ~ Depth, 
+                color= ~genus.shannon,symbol=~Collect_loc)
+
+fig.g
+```
+
+
+# PCA
+
+```{r}
+library(cluster)
+
+gdf <- t(g.prf)
+gdf1 <- gdf[,which(colSums(gdf)>0.4)]
+g.pam <- pam(gdf1, k=3)
+plot(g.pam)
+```
+
+
+```{r}
+library(ggfortify)
+
+g.prf1 <- as.data.frame(g.prf)
+g.prf$taxid <- rownames(g.prf1)
+
+p1 <- autoplot(g.pam,data=as.data.frame(gdf),
+               loadings=T,loadings.label=T,frame=T,frame.type="norm",
+               loadings.colour="black")
+p1
+```
+
+```{r}
+loadings <- layer_data(p1,3)
+loadings[which.max(loadings$y),]
+loadings[which.max(loadings$x),]
+```
+
+
+
+```{r}
+p2 <- autoplot(g.pam,data=as.data.frame(gdf),
+               loadings=T,frame=T,frame.type="norm",
+               loadings.colour="black") + theme_bw()
+p2
+```
+
+
+
+
+# depth vs. g_Nitro
+```{r}
+g.df.n <- g.df%>%filter(taxid==691)
+
+g.df.nm <- merge(metadata.df,g.df.n,by.x="fmtID",by.y="sample")
+
+fig5 <- plot_ly(g.df.nm, x=~Longitude, y=~Latitude, z= ~ Depth, 
+                color= ~pct)
+
+fig5
+```
+
+```{r}
+ggplot(g.df.nm,aes(x=Depth,y=pct)) + geom_point()
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
