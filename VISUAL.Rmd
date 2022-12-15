@@ -24,7 +24,7 @@ library(ggvenn)
 library(plotly)
 ```
 
-# Intro
+# Metadata
 
 ```{r}
 metadata.df <- read_excel("./TS21-merged-metadata.xlsx","subset",
@@ -70,10 +70,11 @@ fig4 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth,
 fig4
 ```
 
-# Phylum profile
+# Kraken2
+## Phylum profile
 
 ```{r}
-p.prf <- read.table("./merge.P.pct")
+p.prf <- read.table("profiles/merge.P.pct")
 
 p.shannon <- as.data.frame(diversity(p.prf,MARGIN=2))
 colnames(p.shannon) <- "phylum.shannon"
@@ -89,11 +90,11 @@ fig.p <- plot_ly(mdf, x=~Longitude, y=~Latitude, z= ~ Depth,
 fig.p
 ```
 
-# genus profile
+## genus profile
 
 ```{r}
-g.prf <- read.table("./merge.G.pct")
-g.idx <- read.table("./merge.G.idx",col.names = c("taxid","rank","annotation"))
+g.prf <- read.table("profiles/merge.G.pct")
+g.idx <- read.table("profiles/merge.G.idx",col.names = c("taxid","rank","annotation"))
 
 g.shannon <- as.data.frame(diversity(g.prf,MARGIN=2))
 colnames(g.shannon) <- "genus.shannon"
@@ -140,7 +141,7 @@ fig.g
 ```
 
 
-# PCA
+## PCA
 
 ```{r}
 library(cluster)
@@ -182,7 +183,7 @@ p2
 
 
 
-# depth vs. g_Nitro
+## depth vs. g_Nitro
 ```{r}
 g.df.n <- g.df%>%filter(taxid==691)
 
@@ -202,7 +203,7 @@ ggplot(g.df.nm,aes(x=Depth,y=pct)) + geom_point()
 ```
 
 
-
+# MAGs profile
 
 
 
