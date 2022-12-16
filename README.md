@@ -44,6 +44,10 @@ for i in {FDZ081,FDZ077,FDZ064,FDZ050,FDZ060,FDZ036,FDZ041,FDZ033};do find /dssg
 ```
 found 284 samples, but 277 unique.
 
+# supp.
+for i in {FDZ061,FDZ062,FDZ063};do find /dssg/home/acct-trench/share/DATA/RAW_Merge -name "$i*R1.fq.gz";done > tmp/tmp.R1.lst
+## add 87 samples
+
 mapping:
 ```bash
 mkdir bowtie2
@@ -54,10 +58,8 @@ perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/
   print FH "bowtie2 -p 30 -x drep_all/drep_all_95.rename -S bowtie2/$base.d95.sam \\
   -1 $F[0] \\\n  -2 $p2\n"; close FH;' tmp/tmp.R1.lst
 
-#
-
-#for i in `ls tmp/*.slurm`;do sbatch sbatch $i; done
-
+# submit working batch
+conda activate meer
 sbatch scripts/bowtie2.slurm
 ```
 
@@ -68,7 +70,14 @@ for i in  `ls bowtie2/*.sam|xargs -n1 basename|sed 's/.d95.sam//'`; do
   echo perl src/counts.pl bowtie2/$i.d95.sam bowtie2/$i.d95.count > tmp/count.$j.sh;
   j=$(($j + 1));
 done
+# alternatively
+j=1
+for i in  `find bowtie2 -name "*.sam" -atime -0.25|xargs -n1 basename|sed 's/.d95.sam//'`; do
+  echo perl src/counts.pl bowtie2/$i.d95.sam bowtie2/$i.d95.count > tmp/count.$j.sh;
+  j=$(($j + 1));
+done
 
+#
 sbatch scripts/count.slurm
 
 ```
@@ -78,7 +87,9 @@ Sumamrize reference length:
 module load samtools/1.13-gcc-11.2.0
 samtools faidx drep_all/drep_all_95.rename.fasta
 
-srun -N 1 -n 1 -p 64c512g perl src/merge.count.pl drep_all/drep_all_95.rename.fasta.fai bowtie2 d95 select33.d95.sum
+salloc -N 1 -n 40 -p 64c512g
+ssh nodexxx
+nohup perl src/merge.count.pl drep_all/drep_all_95.rename.fasta.fai bowtie2 d95 profiles/select11dives.d95.sum &
 ```
 
 Visualization can be found in `VISUAL.Rmd`.

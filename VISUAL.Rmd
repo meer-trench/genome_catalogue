@@ -22,15 +22,20 @@ if (!require(devtools)) install.packages("devtools")
 if (!require(ggvenn)) devtools::install_github("yanlinlin82/ggvenn")
 library(ggvenn)
 library(plotly)
+
+
+
 ```
 
 # Metadata
 
 ```{r}
 metadata.df <- read_excel("./TS21-merged-metadata.xlsx","subset",
-                          col_types=c("text","numeric","numeric","numeric",
-                                      "text","text","date","text"),
-                          na="NA")
+    col_types=c(
+      "numeric","text","numeric","numeric","numeric",
+      "text","text","date","text","text","numeric","numeric",
+      "text","numeric","numeric","numeric","numeric","numeric","numeric"),
+    na="NA")
 
 metadata.df$fmtID <- gsub("-",".",metadata.df$fmtID,fixed = T)
 metadata.df$fmtID <- gsub("[()]","_",metadata.df$fmtID,perl=T)
@@ -39,6 +44,8 @@ metadata.df$Collect_date <- as.POSIXlt(metadata.df$Collect_date,
                                        formats = "%Y-%m-%d")
 
 metadata.df$day <- as.numeric(difftime(metadata.df$Collect_date,"2021-08-21 8:0:0",units="days"))
+
+
 ```
 
 ## No.dive
@@ -47,6 +54,25 @@ fig1 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, color= ~No.d
 
 fig1
 ```
+```{r}
+repr.dive.df <- ddply(
+  unique(metadata.df[,c("No.dive","Location","Longitude","Latitude")]),
+  c("No.dive","Location"),summarize,
+  Longitude=mean(Longitude), Latitude=mean(Latitude))
+
+#ggplot(repr.dive.df%>%filter(grepl("Mar",Location)),
+ggplot(repr.dive.df,
+       aes(x=Longitude,y=Latitude)) + 
+  geom_point(aes(color=No.dive)) +
+  geom_text(aes(label=No.dive),hjust=1.1) + theme_bw()
+
+ggplot(repr.dive.df%>%filter(grepl("Mar",Location)),
+       aes(x=Longitude,y=Latitude)) + 
+  geom_point(aes(color=No.dive)) +
+  geom_text(aes(label=No.dive),hjust=1.1) + theme_bw()
+```
+
+
 ## Collector
 ```{r}
 fig2 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, color= ~Collector)
@@ -206,10 +232,203 @@ ggplot(g.df.nm,aes(x=Depth,y=pct)) + geom_point()
 # MAGs profile
 
 
+Check `README.md` for more details how I careated the following profiles.
+
+Load raw count profile
+```{r}
+#index
+refidx <- read.table("./drep_all/drep_all_95.rename.fasta.gz.fai",
+                     col.names = c("refID","length","chrPt","lineLen","LineLen2"))
+
+# raw bin count
+raw.bin.prof <- as.matrix(read.table(
+  gzfile("profiles/select11dives.d95.sum.bin.raw.count.gz")))
+samples <- colnames(raw.bin.prof)
+bins <- rownames(raw.bin.prof)
+```
+
+Get refid's bin ID:
+```{r}
+parse.one <- function(res, result) {
+  m <- do.call(rbind, lapply(seq_along(res), function(i) {
+    if(result[i] == -1) return("")
+    st <- result[i]
+    substring(res[i], st, st + attr(result, "match.length")[i] - 1)
+  }))
+  return(m)
+}
+
+refidx$bin <- as.character(parse.one(refidx$refID, 
+  regexpr("^.+\\.\\d+", refidx$refID, perl = TRUE)))
+```
+```{r}
+
+ggplot(refidx,aes(x=length)) + geom_density() + scale_x_log10()
+```
+
+filter metadata:
+```{r}
+select.metadata.df <- metadata.df%>%filter(fmtID%in%samples)
+select.samples <- select.metadata.df$fmtID
+select.bin.raw.prof <- 
+  raw.bin.prof[,colnames(raw.bin.prof)%in%select.samples]
+ggplot(select.metadata.df,aes(x=Location,y=Depth)) + geom_boxplot()
+
+```
+## Show location
+Specific set north/south slope sampling site of Mariana trench.
+
+```{r}
+select.metadata.df$slope <- ifelse(
+  select.metadata.df$No.dive=="FDZ064","NorthSlope",
+  ifelse(
+    select.metadata.df$No.dive%in%c("FDZ063","FDZ061"),"ravineBotton",
+    ifelse(
+      select.metadata.df$No.dive=="FDZ062","SouthSlope",NA
+    )
+  )
+)
+```
 
 
+```{r}
+repr.dive.df <- unique(select.metadata.df[,c("No.dive","Location","Longitude","Latitude")])
+
+repr.dive.df <- ddply(repr.dive.df,c("No.dive","Location"),summarize,
+                      Longitude=median(Longitude),Latitude=median(Latitude))
+
+ggplot(repr.dive.df,aes(x=Longitude,y=Latitude)) + 
+  geom_point(aes(color=No.dive)) +
+  geom_text(aes(label=No.dive),hjust=1) + theme_classic()
+
+if(do.write){
+  ggsave("figures/select.dives.map.pdf",width = 10,height=6)
+}
+ggplot(repr.dive.df%>%filter(grepl("Mar",Location)),aes(x=Longitude,y=Latitude)) + 
+  geom_point(aes(color=No.dive)) +
+  geom_text(aes(label=No.dive),hjust=1)
+```
+
+## Unmapping rate
+```{r}
+unmappedReads <- data.frame(
+  fmtID       = colnames(select.bin.raw.prof),
+  unmap.count = select.bin.raw.prof["UNMAPPED",],
+  all.count   = colSums(select.bin.raw.prof),
+  unmap.rate  = select.bin.raw.prof["UNMAPPED",]/colSums(select.bin.raw.prof))
+
+unmappedReads$mappingRate <- 1 - unmappedReads$unmap.rate
+
+unmap.merge.df <- merge(select.metadata.df,unmappedReads,by="fmtID")
+```
+
+```{r}
+ggplot(unmap.merge.df,aes(x=No.dive,y=mappingRate)) + 
+  geom_boxplot(aes(fill=No.dive)) + 
+  facet_grid(.~Location,scales = "free",space = "free") + ylim(c(0,1)) +
+  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0)) 
+```
+
+```{r}
+ggplot(unmap.merge.df%>%filter(!is.na(slope)),
+       aes(x=slope,y=mappingRate,fill=No.dive)) + geom_boxplot()
+```
 
 
+## Normalize profile
+```{r}
+library(dplyr)
+refBin <- ddply(refidx[,c("bin","length")],"bin",summarise,
+                seqs=length(bin),length=sum(length))
 
+select.bin.norm.prof <- select.bin.raw.prof[-nrow(select.bin.raw.prof),]
+select.bin.norm.prof <-
+  select.bin.norm.prof[order(rownames(select.bin.norm.prof)),]
 
+# Make sure the bin name orders are consistent
+length(which(rownames(select.bin.norm.prof)==refBin$bin)) ==nrow(select.bin.norm.prof)
+
+tmp <- 
+  apply(select.bin.norm.prof,2,function(x){x*150/refBin$length})
+select.bin.norm.prof <- 
+  apply(tmp,2,function(x){x/sum(x)})
+```
+
+```{r}
+p.0 <- ggplot(refBin,aes(x=seqs,y=length)) + geom_density2d() +
+  scale_x_continuous(breaks=seq(0,6)*100,limits=c(0,600)) + 
+  scale_y_continuous(breaks=seq(0,6)*1e6,limits=c(1e5,6e6)) + theme_bw()
+
+p.x <- ggplot(refBin,aes(x=seqs)) + geom_density() +
+  scale_x_continuous(breaks=seq(0,6)*100,limits=c(0,600)) + 
+  scale_y_reverse() + theme_bw()
+
+p.y <- ggplot(refBin,aes(x=..density..,y=length)) + geom_density() +
+  scale_y_continuous(breaks=seq(0,6)*1e6,limits=c(1e5,6e6)) + theme_bw()
+
+cowplot::plot_grid(p.0,p.y,p.x,rel_widths=c(3,1),rel_heights=c(3,1))
+```
+
+### alpha diversity
+```{r}
+library(vegan)
+
+select.bin.alpha <- data.frame(
+  fmtID=colnames(select.bin.norm.prof),
+  shannon = diversity(select.bin.norm.prof,"shannon",MARGIN = 2),
+  simpson = diversity(select.bin.norm.prof,"simpson",MARGIN = 2),
+  invsimpson = diversity(select.bin.norm.prof,"invsimpson",MARGIN = 2)
+  )
+
+select.bin.alpha.melt <- melt(select.bin.alpha,id.vars = "fmtID",
+                              variable.name = "method",value.name = "diversity")
+bin.alpha.merge.df <- merge(select.metadata.df,select.bin.alpha.melt,by="fmtID")
+
+```
+```{r}
+ggplot(bin.alpha.merge.df,aes(x=No.dive,y=diversity)) + 
+  geom_boxplot(aes(fill=No.dive)) + 
+  facet_grid(method~Location,scales = "free",space = "free_x") +
+  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0))
+```
+
+```{r}
+ggplot(bin.alpha.merge.df%>%filter(No.dive%in%c("FDZ061","FDZ063")),
+       aes(x=No.dive,y=diversity)) + 
+  geom_boxplot(aes(fill=No.dive)) + 
+  facet_grid(method~Location,scales = "free",space = "free_x") +
+  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0)) + 
+  stat_compare_means()
+```
+
+```{r}
+bin.alpha.merge.df <- bin.alpha.merge.df[order(bin.alpha.merge.df$LayerDepth),]
+ggplot(bin.alpha.merge.df,aes(x=LayerDepth,y=diversity)) + 
+  geom_path(aes(group=interaction(No.dive,Characteristics)),alpha=.7) +
+  geom_point(aes(color=interaction(No.dive,Characteristics))) +
+  facet_grid(method~Location,scales = "free",space = "free_x") +
+  theme_bw()
+```
+
+```{r}
+ggplot(bin.alpha.merge.df%>%filter(method=="shannon")) + 
+  geom_bar(stat="identity",aes(x=LayerDepth,y=diversity,fill=Location),width=2) +
+  facet_wrap(~Location+interaction(No.dive,Characteristics)) +
+  ylim(c(0,10)) + theme_bw()
+```
+
+## correlation
+```{r}
+library(pheatmap)
+bins.cor <- cor(t(select.bin.norm.prof))
+sams.cor <- cor(select.bin.norm.prof,method="spearman")
+
+sams.anno <- as.data.frame(select.metadata.df)
+rownames(sams.anno) <- sams.anno$fmtID
+sams.anno.color <- sams.anno[,c("Red","Green","Blue","Yellow","White","Black")]
+
+pheatmap(sams.cor,annotation_col =
+           sams.anno[,c("Depth","LayerDepth","Location"),F],
+         show_rownames = F, show_colnames = F)
+```
 
