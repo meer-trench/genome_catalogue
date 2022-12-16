@@ -1,0 +1,4 @@
+outs:
+- md5: 04dbbeeecb0ef5dea69125c265a44fbb
+  size: 258034414
+  path: select8dives.d95.sum.seq.raw.count.gz
