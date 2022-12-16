@@ -8,6 +8,6 @@
 #SBATCH --mail-user=fangchao@genomics.cn
 #SBATCH --output=tmp/array_%A_%a.out
 #SBATCH --error=tmp/array_%A_%a.err
-#SBATCH --array=1-277%70
+#SBATCH --array=1-87%87
 
 sh tmp/bowtie2.$SLURM_ARRAY_TASK_ID.sh
