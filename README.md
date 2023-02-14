@@ -194,3 +194,15 @@ vamb -p 60 --outdir VAMB --fasta drep_all/all_passed_bins.rename.fasta --jgi jgi
 vamb --outdir VAMB10 --fasta drep_all/all_passed_bins.10.fasta --jgi jgi/jgi.abundance.10.dat 
 
 ```
+
+### Taxonomic classify
+
+```bash
+export K2DB_PF="/dssg/home/acct-trench/trench-1/USER/fangchao/tools/kraken2DB_pluspf_20221209"
+
+kraken2 --db $K2DB_PF --threads 64 --report taxon/all_passed_bins.kreport2 drep_all/all_passed_bins.rename.fasta > taxon/all_passed_bins.kraken2
+```
+
+```bash
+cut -f1-4 taxon/all_passed_bins.kraken2 | bgzip -@ 4 -c > taxon/all_passed_bins.kraken2.brief.gz
+```
