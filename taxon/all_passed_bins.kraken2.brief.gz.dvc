@@ -1,0 +1,4 @@
+outs:
+- md5: db51b50fd783b0600f754fd6d0f2b50f
+  size: 158087171
+  path: all_passed_bins.kraken2.brief.gz
