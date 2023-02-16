@@ -432,3 +432,91 @@ pheatmap(sams.cor,annotation_col =
          show_rownames = F, show_colnames = F)
 ```
 
+# MGA taxonomic identification
+```{r}
+kk2.all.benchmark.tsv <- read.table(
+  "taxon/all_passed_bins.kraken2.benchmark.tsv",
+  col.names = c("bin","seqs","length","S.p","S.c","G.p","G.c","F.p","F.c",
+                "O.p","O.c","C.p","P.c","P.p","P.c","K.p","K.c","D.p","D.c","R.p","R.c")
+  )
+
+kk2.all.S.benchmark.tsv <- read.table(
+  "taxon/all_passed_bins.kraken2.S.benchmark.tsv",
+  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
+  )
+
+bin.d99.S.benchmark.tsv <- read.table(
+  "taxon/drep_99.cluster.S.benchmark.tsv",
+  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
+  )
+gtdbtk.d99.S.benchmark.tsv <- read.table(
+  "taxon/drep_99.gtdbtk.S.benchmark.tsv",
+  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
+  )
+
+kk2.d95.S.benchmark.tsv <- read.table(
+  "taxon/drep_95.kraken2.S.benchmark.tsv",
+  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
+  )
+
+kk2.all.classify.df <- read.table(
+  gzfile("taxon/all_passed_bins.kraken2.detail.gz"),
+  col.names = c("Classify","ID","RankID","length",
+                "Rank_S","Rank_G","Rank_F","Rank_O","Rank_C","Rank_P","Rank_K","Rank_D","Rank_R")
+  )
+
+```
+
+```{r}
+merge.df <- rbind(
+  data.frame(group="kk2.all",Rank="S",kk2.all.S.benchmark.tsv),
+  data.frame(group="cluster.d99",Rank="S",bin.d99.S.benchmark.tsv),
+  data.frame(group="gtdbtk.d99",Rank="S",gtdbtk.d99.S.benchmark.tsv),
+  data.frame(group="kk2.d95",Rank="S",kk2.d95.S.benchmark.tsv)
+)
+mean(kk2.all.S.benchmark.tsv$purify)
+mean(kk2.all.S.benchmark.tsv$completeness)
+
+length(which(kk2.all.S.benchmark.tsv$completeness>=0.5&kk2.all.S.benchmark.tsv$purify>0.9))
+
+ggplot(merge.df,aes(x=group,y=purify,fill=group)) + geom_boxplot() + theme_bw() + coord_flip() + 
+  scale_y_continuous(breaks=c(0,0.5,1),labels = c(0,50,100)) + xlab("Purity(%)")
+
+ggplot(merge.df,aes(x=group,y=completeness,fill=group)) + geom_boxplot() + theme_bw() + coord_flip() + 
+  scale_y_continuous(breaks=c(0,0.5,1),labels = c(0,50,100))
+```
+```{r}
+mean(kk2.d95.S.benchmark.tsv$purify)
+mean(kk2.d95.S.benchmark.tsv$completeness)
+
+length(which(kk2.d95.S.benchmark.tsv$completeness>=0.5&kk2.d95.S.benchmark.tsv$purify>0.9))
+
+```
+
+```{r}
+ggplot(kk2.all.S.benchmark.tsv,aes(x=purify,y=completeness)) + 
+  stat_density2d(geom="raster",contour = F,h=c(.5,.5))
+
+```
+```{r}
+mean(gtdbtk.d99.S.benchmark.tsv$purify)
+mean(gtdbtk.d99.S.benchmark.tsv$completeness)
+
+length(which(gtdbtk.d99.S.benchmark.tsv$completeness>=0.5&gtdbtk.d99.S.benchmark.tsv$purify>0.9))
+
+```
+
+```{r}
+ggplot(kk2.d95.S.benchmark.tsv,aes(x=purify)) + geom_boxplot()
+ggplot(kk2.d95.S.benchmark.tsv,aes(x=completeness)) + geom_boxplot()
+
+```
+
+
+
+### Curate
+```{r}
+kk2vamb.df <- merge()
+```
+
+
