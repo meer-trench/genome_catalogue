@@ -205,4 +205,90 @@ kraken2 --db $K2DB_PF --threads 64 --report taxon/all_passed_bins.kreport2 drep_
 
 ```bash
 cut -f1-4 taxon/all_passed_bins.kraken2 | bgzip -@ 4 -c > taxon/all_passed_bins.kraken2.brief.gz
+
+perl scripts/kk2rank.pl \
+  /mnt/x/k2_pluspf_20221209/inspect.txt \
+  taxon/all_passed_bins.kraken2.brief.gz \
+  |bgzip -@ 4 -c > taxon/all_passed_bins.kraken2.detail.gz
+
+perl scripts/binTaxonBench.pl VAMB/clusters.tsv.gz \
+  taxon/all_passed_bins.kraken2.detail.gz \
+  > taxon/all_passed_bins.kraken2.benchmark.tsv
+
+for i in {S,G,F,O,C,P};do 
+perl scripts/binTaxonBench.pl $i VAMB/clusters.tsv.gz \
+  taxon/all_passed_bins.kraken2.detail.gz \
+  > taxon/all_passed_bins.kraken2.$i.benchmark.tsv &
+done
+``` 
+
+To improve the completeness, try using drep dataset.
+
+```bash
+zcat drep_all/all_passed_bins.rename.fasta.gz|grep ">" |sed 's/>//' > drep_all/all_passed_bins.rename.lst
+zcat drep_all/drep_all_95.rename.fasta.gz|grep ">"|sed 's/>//' > drep_all/drep_all_95.rename.lst
+zcat drep_all/drep_all_99.rename.fasta.gz|grep ">"|sed 's/>//' > drep_all/drep_all_99.rename.lst
+
+for i in {S,G,F,O,C,P};do 
+perl scripts/binTaxonBench.pl $i VAMB/clusters.tsv.gz \
+  taxon/all_passed_bins.kraken2.detail.gz drep_all/drep_all_95.rename.lst\
+  > taxon/drep_95.kraken2.$i.benchmark.tsv &
+done
+
+```
+
+Try Zewei's binners
+```bash
+DIR=/dssg/home/acct-trench/trench/USER/songzewei/data_process/tst_binning_pathways
+
+
+/dssg/home/acct-trench/trench/USER/songzewei/data_process/tst_binning_pathways/data/derep_pathways/data_tables/Wdb.csv
+
+/dssg/home/acct-trench/trench/USER/songzewei/data_process/tst_binning_pathways/data/derep_pathways/dereplicated_genomes/FDZ064-BaGW12-14.bin.107.fa|
+
+perl -e ' open I, "<drep_all/drep99_gtdbtk_classify/meer_drep99_all.summary.tsv";
+$C=0; <I>; while(<I>){
+  chomp; @F=split /\t/; @F0 = split(/.bin./,$F[0]); $pfx = "$F0[0].$F0[1]";
+  $HS{$pfx} = $C; $C++;
+}; close I; print STDERR "Done file1.\n";
+open L,"<drep_all/drep_all_99.rename.lst";
+while (<L>){
+  chomp; @F= split /\./; $pfx="$F[0].$F[1]";
+  if(exists $HS{$pfx}){
+    print "$HS{$pfx}\t$_\n";
+  }
+};close L;' |bgzip > taxon/drep99_gtdbtk_classify.clusters.lst.gz
+
+for i in {S,G,F,O,C,P};do 
+perl scripts/binTaxonBench.pl $i taxon/drep99_gtdbtk_classify.clusters.lst.gz \
+  taxon/all_passed_bins.kraken2.detail.gz \
+  > taxon/drep_99.gtdbtk.$i.benchmark.tsv &
+done
+
+#d99
+perl -e ' open I, "< drep_all/drep_all_99/data_tables/Wdb.csv";
+  <I>; while(<I>){
+  chomp; @F=split /,/; @F0 = split(/\./,$F[0]); $pfx = "$F0[0].$F0[2]";
+  $HS{$pfx} = $F[1];
+}; close I; print STDERR "Done file1.\n";
+open L,"<drep_all/drep_all_99.rename.lst";
+while (<L>){
+  chomp; @F= split /\./; $pfx="$F[0].$F[1]";
+  if(exists $HS{$pfx}){
+    print "$HS{$pfx}\t$_\n";
+  }
+};close L;' |bgzip > taxon/drep99_cluster.lst.gz
+
+for i in {S,G,F,O,C,P};do 
+perl scripts/binTaxonBench.pl $i taxon/drep99_cluster.lst.gz \
+  taxon/all_passed_bins.kraken2.detail.gz \
+  > taxon/drep_99.cluster.$i.benchmark.tsv &
+done
+```
+
+
+# test profile
+```bash
+perl scripts/call.prof.pl S jgi/jgi.abundance.dat taxon/all_passed_bins.kraken2.detail.gz > profiles/jgi.kk2.S.prof
+
 ```
