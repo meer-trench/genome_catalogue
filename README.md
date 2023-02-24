@@ -95,7 +95,7 @@ Visualization can be found in `VISUAL.Rmd`.
 
 
 
-# derep_all_path
+# derep_95_path
 ```bash
 cd  /dssg/home/acct-trench/share/DATA/CLEAN/
 
@@ -126,63 +126,119 @@ find /dssg/home/acct-trench/share/DATA/RAW_Merge -name "*R1.fq.gz" > tmp/tmp.R1.
 bowtie2 -p 30 -x drep_all/all_passed_bins.rename -S bowtie2/FDZ071-RRR10-12.all.sam \
 -1/dssg/home/acct-trench/share/DATA/RAW_Merge/sample627_0914/FDZ071-RRR10-12_R1.fq.gz -2 /dssg/home/acct-trench/share/DATA/RAW_Merge/sample627_0914/FDZ071-RRR10-12_R1.fq.gz
 ```
+### Mapping fq to contig catalog
+The script include following steps:  
+1. Mapping fq to contig catalog  
+2. sort sam and save as bam  
+3. calculate mapping depth by using jgi method  
 
+ref: https://github.com/RasmussenLab/vamb
 ```bash
 perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
   if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
   open(FH, "> tmp/bowtie2.$array.sh");
-  print FH "bowtie2 -p 30 -x drep_all/all_passed_bins.rename -S bowtie2/$base.all.sam \\
-  -1 $F[0] \\\n  -2 $p2\n"; close FH;' tmp/tmp.R1.lst
+  print FH "bowtie2 -p 30 -x drep_all/drep_all_95.rename -S bowtie2/$base.d95.sam -1 $F[0] -2 $p2 && \\\n"; 
+  print FH "samtools view -@ 30 -b bowtie2/$base.d95.sam| samtools sort -@ 10 -o bowtie2/$base.d95.bam && \\\n";
+  print FH "jgi_summarize_bam_contig_depths --noIntraDepthVariance --outputDepth depth/$base.d95.raw.jgi bowtie2/$base.d95.bam \n";
+  close FH;' tmp/tmp.R1.lst
 
+sbatch scripts/bowtie2.slurm
 
 ```
-https://github.com/RasmussenLab/vamb
 
-### Sort sam to bam
+#### hotfix
 ```bash
-perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base);
-  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
-  open(FH, "> tmp/sort.$array.sh");
-  print FH "samtools view -@ 10 -b bowtie2/$base.all.sam| samtools sort -@ 10 -o bowtie2/$base.all.bam \n"; close FH;' tmp/tmp.R1.lst
 
-sbatch scripts/sort.slurm
+$ for i in `find depth/*.d95.raw.jgi -size -1000`;do b=`basename -s .d95.raw.jgi $i`;grep -n $b tmp/tmp.R1.lst;done|sed 's/:.*$//'|sort -n|tr '\n'
+1,15,20,123,125,251,260,261,272,303,312,325,330,341,342,349,351,360,363,367,375,380,403,410,411,433,436,452,460,468,513,515,523,535,539,541,552,566,576,591,608,615,618,625,659,679,695,775,785,799,805,838,863,869,919,927,949,953,960,984,1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012,1013,1014,1015,1016,1017,1018,1019,1020,1021,1022,1023,1024,1025,1026,1027,1028,1029,1030,1031,1032,1033,1034,1035,1036,1037,1038,1039,1040,1041,1042,1043,1044,1045,1046,1047,1048,1049,1050,1051,1052,1053,1054,1055,1056,1057,1058,1059,1060,1061,1062,1063,1064,1065,1066,1067,1068,1069,1070,1071,1072,1073,1074,1075,1076,1077,1078,1079,1080,1081,1082,1083,1084,1085,1086,1087,1088,1089,1090,1091,1092,1093,1094,1095,1096,1097,1098,1099,1100,1101,1102,1103,1104,1105,1106,1107,1108,1109,1110,1111,1112,1113,1114,1115,1116,1117,1118,1119,1120,1145,1149,1150,1153,1167
+#manually add 695 for FDZ071-RRR2-4.1
+
+
 ```
 
-Calculate bins depth:
 ```bash
-jgi_summarize_bam_contig_depths --noIntraDepthVariance --outputDepth {output} {input} 2>{log}
 
-perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base);
-  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
-  open(FH, "> tmp/jgi.$array.sh");
-  print FH "jgi_summarize_bam_contig_depths --noIntraDepthVariance --outputDepth depth/$base.all.raw.jgi bowtie2/$base.all.bam \n"; close FH;' tmp/tmp.R1.lst
+find bowtie2/*.d95.bam -size -1000|sed 's/.d95.bam//;s/bowtie2\///'|sort > empty.bam.lst
+find depth/*.d95.raw.jgi -size -1000|sed 's/.d95.raw.jgi//;s/depth\///'|sort > empty.jgi.lst
+comm -23 empty.jgi.lst empty.bam.lst > valid.bam.lst
 
-sbatch scripts/jgi.slurm
+for i in `cat valid.bam.lst`;do b=`grep -n $i tmp/tmp.R1.lst|sed 's/:.*$//'`;sed -i '1s/^/#/' tmp/bowtie2.$b.sh;done
+
+cp scripts/bowtie2.slurm scripts/bowtie2.patch.slurm
+# Add above arrays into slurm file
+sbatch scripts/bowtie2.patch.slurm
 ```
 
-cut column 1-3, 4-5:
+### jgi to PFKM
+After fnish all jgi calculation. try to generate a PFKM profile.
+Use bam-readcount to generate reads count information from bam files: https://github.com/genome/bam-readcount
 ```bash
-cut -f1-3 depth/FDZ031YE0-5.all.raw.jgi > jgi/jgi.column1to3
-
-perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base);
+perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
   if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
-  open(FH, "> tmp/cut45.$array.sh");
-  print FH "cut -f1-3 --complement depth/$base.all.raw.jgi > depth/$base.all.4to5.jgi \n"; close FH;' tmp/tmp.R1.lst
-sbatch scripts/cut.slurm
+  open(FH, "> tmp/stat.$array.sh");
+  print FH "samtools view -h bowtie2/$base.d95.bam|samtools stats|grep ^SN | cut -f 2- > bowtie2/$base.d95.stat \n";
+  close FH;' tmp/tmp.R1.lst
 
-#paste jgi/jgi.column1to3 depth/*.all.4to5.jgi  > jgi/jgi.abundance.dat
-# too many open files
+sbatch scripts/stat.slurm
 
-ls depth/*.all.4to5.jgi|split -d -l 250 - tmp/split.jgi.
+perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
+  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
+  open(FH, "> tmp/fpkm.$array.sh");
+  print FH "perl scripts/fpkm_cal.pl 150 bowtie2/$base.d95.stat depth/$base.d95.raw.jgi > depth/$base.d95.fpkm\n";
+  close FH;' tmp/tmp.R1.lst
 
-for i in {0..4};do
-  cat tmp/split.jgi.0$i|xargs paste > tmp/paste.$i &
-done
-wait && paste jgi/jgi.column1to3 tmp/paste.{0..4} > jgi/jgi.abundance.dat
+sbatch scripts/fpkm.slurm
 
-sbatch scripts/paste.slurm
+perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
+  ($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
+  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++; $s++;$l=1; 
+  open(FH, "< depth/$base.d95.fpkm");
+  while(<FH>){chomp;@FS=split; $HS{V}{$FS[0]}{$base} = $FS[4]; 
+    $HS{R}{$FS[0]}{C} ++ if $FS[4] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
+    $HS{C}{$base}{C} ++ if $FS[4] > 0;  $HS{C}{$base}{S} += $FS[4]; $l++;
+  }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
+  END{print STDERR "\nSummarizing ... \r"; open R,">profiles/MEER1225.fpkm.row.stat"; 
+    open C,">profiles/MEER1225.fpkm.col.stat"; open V,">profiles/MEER1225.fpkm.profile";
+    print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
+    print V "OTU"; foreach $c (sort keys %{$HS{C}}){
+      print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
+    }; print V "\n"; $l=0;
+    foreach $r (sort keys %{$HS{R}}){
+      print R "$r\t$HS{R}{$r}{L}\t$HS{R}{$r}{C}\n"; print V "$r"; $l++;
+      foreach $c (sort keys %{$HS{C}}){
+        print V "\t$HS{V}{$r}{$c}";
+      }
+      print V "\n";
+      print STDERR "Summarizing $l / $M \r";
+    };print STDERR "\nDONE\n"
+  }' tmp/tmp.R1.lst
 
 ```
+This will generate `profiles/MEER1225.fpkm.profile` wiht FPKM of all 1225 samples. The FPKM was calculated from coverage by using `jgi_summarize_bam_contig_depths`. This is a method from Maxbat2.
+
+$$
+jgi_i = \frac{X_i * ins} {l_i}
+$$
+
+where $X_i$ is read counts mapped to contig $i$; $ins$ is insert size, $l_i$ is conig effective length (trimmed ends).
+
+$$
+X_i = \frac {jgi \cdot l_i}  {ins}
+$$
+
+FPKM: Substitute reads with fragments per kilobase of exon/gene/contig/genome per million reads mapped.
+
+$$
+FPKM = \frac {X_i} {(l_i / 10^3)(N/10^6)} = \frac {X_i} {l_iN} \cdot 10^9
+$$
+
+$$
+=\frac {jgi_i\cdot l_i / ins} {l_iN} \cdot 10^9 = \frac {jgi_i} {N \cdot ins} \cdot 10^9
+$$
+
+Where $N$ is total number of reads sequenced.
+
+‍
 
 vamb:
 ```bash
