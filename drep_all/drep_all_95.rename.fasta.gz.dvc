@@ -1,5 +1,4 @@
 outs:
-- md5: 172c6245b1477fbe8b71dd2fb7aad942
-  size: 3382825686
+- md5: ce8b55f13fd835c35e1820ed6206c368
+  size: 3592315136
   path: drep_all_95.rename.fasta.gz
-  isexec: true
