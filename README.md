@@ -238,7 +238,17 @@ $$
 
 Where $N$ is total number of reads sequenced.
 
-‍
+‍Get MAG profile:
+```bash
+
+drep_all/drep_all_95.Widb.csv
+
+
+profiles/MEER1225.fpkm.row.stat.gz
+profiles/MEER1225.fpkm.profile.gz
+
+perl -d scripts/MAG_cal.pl 150 profiles/MEER1225.fpkm.row.stat.gz drep_all/drep_all_95.Widb.csv depth/FDZ064-GR16-18.d95.fpkm > depth/FDZ064-GR16-18.d95.MAG.fpkm
+```
 
 vamb:
 ```bash
