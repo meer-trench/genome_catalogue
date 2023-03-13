@@ -240,14 +240,41 @@ Where $N$ is total number of reads sequenced.
 
 ‍Get MAG profile:
 ```bash
+perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
+  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
+  open(FH, "> tmp/MAG95.$array.sh");
+  print FH "perl scripts/MAG_cal.pl 150 profiles/MEER1225.fpkm.row.stat.gz drep_all/drep_all_95.Widb.csv depth/$base.d95.fpkm > depth/$base.d95.MAG.fpkm\n";
+  close FH;' tmp/tmp.R1.lst
 
-drep_all/drep_all_95.Widb.csv
+sbatch scripts/fpkm.MAG95.slurm
 
+#merge to be a single table
+perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
+  ($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
+  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++; $s++;$l=1; 
+  open(FH, "< depth/$base.d95.MAG.fpkm");
+  while(<FH>){chomp;@FS=split; $HS{V}{$FS[0]}{$base} = $FS[4]; 
+    $HS{R}{$FS[0]}{C} ++ if $FS[4] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
+    $HS{C}{$base}{C} ++ if $FS[4] > 0;  $HS{C}{$base}{S} += $FS[4]; $l++;
+  }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
+  END{print STDERR "\nSummarizing ... \r"; open R,">profiles/MEER1225.d95.fpkm.MAG.row.stat"; 
+    open C,">profiles/MEER1225.d95.fpkm.MAG.col.stat"; open V,">profiles/MEER1225.d95.fpkm.MAG.profile";
+    print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
+    print V "OTU"; foreach $c (sort keys %{$HS{C}}){
+      print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
+    }; print V "\n"; $l=0;
+    foreach $r (sort keys %{$HS{R}}){
+      print R "$r\t$HS{R}{$r}{L}\t$HS{R}{$r}{C}\n"; print V "$r"; $l++;
+      foreach $c (sort keys %{$HS{C}}){
+        print V "\t$HS{V}{$r}{$c}";
+      }
+      print V "\n";
+      print STDERR "Summarizing $l / $M \r";
+    };print STDERR "\nDONE\n"
+  }' tmp/tmp.R1.lst
 
-profiles/MEER1225.fpkm.row.stat.gz
-profiles/MEER1225.fpkm.profile.gz
-
-perl -d scripts/MAG_cal.pl 150 profiles/MEER1225.fpkm.row.stat.gz drep_all/drep_all_95.Widb.csv depth/FDZ064-GR16-18.d95.fpkm > depth/FDZ064-GR16-18.d95.MAG.fpkm
+ls profiles/MEER1225.d95.fpkm.MAG.*|xargs -n1 bgzip
+dvc add profiles/MEER1225.d95.fpkm.MAG.*.gz
 ```
 
 vamb:
