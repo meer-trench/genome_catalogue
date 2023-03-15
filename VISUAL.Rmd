@@ -45,7 +45,7 @@ metadata.df$Collect_date <- as.POSIXlt(metadata.df$Collect_date,
 
 metadata.df$day <- as.numeric(difftime(metadata.df$Collect_date,"2021-08-21 8:0:0",units="days"))
 
-
+summary(metadata.df)
 ```
 
 ## No.dive
@@ -79,13 +79,6 @@ fig2 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, color= ~Coll
 
 fig2
 ```
-## day
-```{r}
-fig3 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, 
-                color= ~day)
-
-fig3
-```
 
 ## Collect_loc
 ```{r}
@@ -96,75 +89,77 @@ fig4 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth,
 fig4
 ```
 
-# Kraken2
-## Phylum profile
-
+# MAG fpkm profile
 ```{r}
-p.prf <- read.table("profiles/merge.P.pct")
+p.prf <- read.table(gzfile("profiles/MEER1225.d95.fpkm.MAG.profile.gz"),
+                    header=T,row.names = 1)
 
-p.shannon <- as.data.frame(diversity(p.prf,MARGIN=2))
-colnames(p.shannon) <- "phylum.shannon"
+p.shannon <- data.frame(
+  MAG.shannon=diversity(p.prf,"shannon",MARGIN=2),
+  MAG.simpson=diversity(p.prf,"simpson",MARGIN=2),
+  MAG.invsimpson=diversity(p.prf,"invsimpson",MARGIN=2)
+)
 p.shannon$fmtID <- rownames(p.shannon)
 
 mdf <-merge(metadata.df,p.shannon,by="fmtID")
 ```
 
+## Alpha diversity
 ```{r}
-fig.p <- plot_ly(mdf, x=~Longitude, y=~Latitude, z= ~ Depth, 
-                color= ~phylum.shannon)
-
-fig.p
+ggplot(mdf,aes(x=MAG.shannon,color=Location)) + geom_density() + theme_bw()
+ggplot(mdf,aes(x=MAG.simpson,color=Location)) + geom_density() + theme_bw()
+ggplot(mdf,aes(x=MAG.invsimpson,color=Location)) + geom_density() + theme_bw()
 ```
-
-## genus profile
-
-```{r}
-g.prf <- read.table("profiles/merge.G.pct")
-g.idx <- read.table("profiles/merge.G.idx",col.names = c("taxid","rank","annotation"))
-
-g.shannon <- as.data.frame(diversity(g.prf,MARGIN=2))
-colnames(g.shannon) <- "genus.shannon"
-g.shannon$fmtID <- rownames(g.shannon)
-
-mdf <-merge(metadata.df,g.shannon,by="fmtID")
-
-```
+总体分布上来看，大部分样本的shannon index可以达到4以上。马沟西部整体丰富度最高，马沟东部次之。
+菲律宾海盆样本的多样性相对较低。
 
 ```{r}
-g.median <- as.data.frame(apply(g.prf,1,median))
-colnames(g.median) <- "median"
-g.median$taxid <- rownames(g.median)
-g.stat <- merge(g.idx,g.median,by="taxid")
+ggplot(mdf,aes(x=MAG.shannon,y=Depth,shape=Location,color=No.dive)) + geom_point()
+ggplot(mdf,aes(x=MAG.simpson,y=Depth,shape=Location,color=No.dive)) + geom_point()
+ggplot(mdf,aes(x=MAG.invsimpson,y=Depth,shape=Location,color=No.dive)) + geom_point()
 ```
+Alpha diversity 与下潜深度的关系。部分低多样性样本点在各个采样区域(Location)都有发现。
+
 
 ```{r}
-options(shiny.maxRequestSize=5000*1024^2)
-pavian::runApp(port=5000)
+ggplot(mdf,aes(x=MAG.shannon,y=LayerDepth,color=Collector)) + stat_density_2d() + geom_point(aes(shape=Location))
+ggplot(mdf,aes(x=MAG.simpson,y=LayerDepth,color=Collector)) + stat_density_2d() + geom_point(aes(shape=Location))
+ggplot(mdf,aes(x=MAG.invsimpson,y=LayerDepth,color=Collector)) + stat_density_2d() + geom_point(aes(shape=Location))
 ```
+
+Alpha diversity 与下潜深度的关系。部分低多样性样本点可能与特定采样人员参与的特定潜次有关。
+- 低多样性样本点多来自菲律宾海盆样本；
+- 低多样性样本点多集中在10cm以下的pushcore分层中。
 
 ```{r}
-select.g <- g.stat$taxid[which(g.stat$median>0.1)]
-
-g.prf0 <- g.prf
-g.prf0$taxid <- rownames(g.prf)
-g.df <- melt(g.prf0,id.vars = "taxid",variable.name = "sample",value.name = "pct")
-
-g.df <- g.df%>%filter(taxid%in%select.g)
-g.df <- merge(g.df,g.idx,by="taxid")
-ggplot(g.df,aes(x=annotation,y=pct)) + geom_boxplot() + coord_flip()
+ggplot(mdf,aes(x=Collector,y=MAG.shannon,fill=Collector)) + geom_violin(alpha=.5) + geom_boxplot(width=.1) + 
+  theme_bw() + facet_grid(.~Location,space="free",scale="free")
 ```
+
+Alpha diversity 在采样人员分组之间的比较。低多样性样本点呈现两种情况：  
+- 在菲律宾海盆地区的低样本点未超出整体样本分布区间(95% CI)，具有一定普遍性；
+- 在马沟内，样本整体多样性高；低丰度样本多为离群点(超出95% CI)，可能是异常状态。
+
+* 95% CI: value < 1.58 * IQR / sqrt(n)
+
+```{r,warning=FALSE}
+ggplot(mdf,aes(x=Collector,y=MAG.shannon,fill=Collector)) + geom_violin() + geom_jitter() +
+  theme_bw() + facet_wrap(~Location+No.dive,ncol=8,scale="free_x")
+```
+
+Alpha diversity 在潜次之间的比较。低多样性样本集中出现于特定潜次。其中FDZ072（Z.WS） & FDZ076(Z.WJ)出现频率最高。
+
 
 ```{r}
-ggplot(g.df%>%filter(taxid!=0),aes(x=annotation,y=pct)) + geom_boxplot() + coord_flip() + theme_bw()
-
+ggplot(mdf%>%filter(No.dive%in%c("FDZ072","FDZ069","FDZ076")),
+       aes(x=interaction(Depth,Characteristics),y=LayerDepth,color=MAG.shannon)) + 
+  geom_point(aes(shape=No.dive)) +
+  scale_color_distiller(palette = "RdBu") + facet_grid(.~No.dive,scale="free",space="free") +
+  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0))
 ```
 
-```{r}
-fig.g <- plot_ly(mdf, x=~Longitude, y=~Latitude, z= ~ Depth, 
-                color= ~genus.shannon,symbol=~Collect_loc)
+低多样性样本集中出现于特定pushcore的深层位置中。
 
-fig.g
-```
 
 
 ## PCA
@@ -172,8 +167,8 @@ fig.g
 ```{r}
 library(cluster)
 
-gdf <- t(g.prf)
-gdf1 <- gdf[,which(colSums(gdf)>0.4)]
+gdf <- t(p.prf)
+gdf1 <- gdf[,which(colSums(gdf)>20)]
 g.pam <- pam(gdf1, k=3)
 plot(g.pam)
 ```
@@ -182,54 +177,153 @@ plot(g.pam)
 ```{r}
 library(ggfortify)
 
-g.prf1 <- as.data.frame(g.prf)
-g.prf$taxid <- rownames(g.prf1)
+p.prf1 <- as.data.frame(p.prf)
+p.prf$taxid <- rownames(p.prf1)
 
-p1 <- autoplot(g.pam,data=as.data.frame(gdf),
+p1 <- autoplot(g.pam,data=as.data.frame(gdf),alpha=.3,
                loadings=T,loadings.label=T,frame=T,frame.type="norm",
                loadings.colour="black")
 p1
 ```
 
+
+
 ```{r}
 loadings <- layer_data(p1,3)
-loadings[which.max(loadings$y),]
-loadings[which.max(loadings$x),]
+loadings$v <- loadings$x^2+loadings$y^2
+loading <- loadings[rev(order(loadings$v)),]
+head(loading,10)
 ```
 
 
-
+## taxonoming
 ```{r}
-p2 <- autoplot(g.pam,data=as.data.frame(gdf),
-               loadings=T,frame=T,frame.type="norm",
-               loadings.colour="black") + theme_bw()
-p2
-```
-
-
-
-
-## depth vs. g_Nitro
-```{r}
-g.df.n <- g.df%>%filter(taxid==691)
-
-g.df.nm <- merge(metadata.df,g.df.n,by.x="fmtID",by.y="sample")
-
-fig5 <- plot_ly(g.df.nm, x=~Longitude, y=~Latitude, z= ~ Depth, 
-                color= ~pct)
-
-fig5
+binmap.tsv <- read.table("drep_all/drep_all_95.binmap.tsv",
+                         col.names = c("bin","cluster"))
+drep_all_95.Cdb.csv <- read.csv("drep_all/drep_all_95.Cdb.csv")
+drep_all_95.Cdb.csv$bin <- gsub(".fa","",gsub(".bin","",drep_all_95.Cdb.csv$genome))
 ```
 
 ```{r}
-ggplot(g.df.nm,aes(x=Depth,y=pct)) + geom_point()
+gtdbtk.ar53 <- read.table(gzfile("drep_all/drep_all_99.gtdbtk.ar53.summary.tsv.gz"),
+                            sep="\t",header = T)
+gtdbtk.ar53$bin <- gsub(".bin","",gtdbtk.ar53$user_genome)
+
+bin.gtdbtk.ar53 <- merge(drep_all_95.Cdb.csv[,c("secondary_cluster","bin")],
+                           gtdbtk.ar53[,c("user_genome","classification","bin")],by='bin')
+
+bin.gtdbtk.ar53%>%filter(secondary_cluster%in%loading$label[1:6])
+```
+
+按loading向量长度排序，前6名、第10名MAG均为古菌。
+
+注释信息简单汇总如下：
+2455_2:   d__Archaea;p__Thermoproteota;c__Nitrososphaeria;o__Nitrososphaerales;
+          f__Nitrosopumilaceae;g__DRGT01;s__DRGT01 sp016838795
+2626_4:   d__Archaea;p__Nanoarchaeota;c__Nanoarchaeia;o__Pacearchaeales;
+          f__GW2011-AR1;g__PSPM01;s__
+2537_0:   d__Archaea;p__Nanoarchaeota;c__Nanoarchaeia;o__SCGC-AAA011-G17;
+          f__JACPIM01;g__;s__
+2466_1:   d__Archaea;p__Thermoproteota;c__Nitrososphaeria;o__Nitrososphaerales;
+          f__Nitrosopumilaceae;g__Nitrosopumilus;s__Nitrosopumilus sp013390905
+2455_1:   d__Archaea;p__Thermoproteota;c__Nitrososphaeria;o__Nitrososphaerales;
+          f__Nitrosopumilaceae;g__DRGT01;s__
+2467_1:   d__Archaea;p__Thermoproteota;c__Nitrososphaeria;o__Nitrososphaerales;
+          f__Nitrosopumilaceae;
+2465_1:   d__Archaea;p__Thermoproteota;c__Nitrososphaeria;o__Nitrososphaerales;
+          f__Nitrosopumilaceae;g__Nitrosopumilus;s__
+
+其中主要成员来自*氨氧化古菌*Nitrososphaeria、*亚硝化侏儒菌科*(Nitrosopumilaceae)和*纳古菌门*（Nanoarchaeota）。
+
+综上，PCA聚类主要分为三种类型：
+- c1, 由氨氧化古菌（2455_2）主导,具体为DRGT01 sp016838795
+- c2, 由纳古菌（2626_4，2537_0）主导，但对应科不同，具体种未知。
+- c3, 由氨氧化古菌（2455_2）主导,具体为Nitrosopumilus sp013390905
 
 
+```{r}
+gtdbtk.bac120 <- read.table(gzfile("drep_all/drep_all_99.gtdbtk.bac120.summary.tsv.gz"),
+                            sep="\t",header = T)
+gtdbtk.bac120$bin <- gsub(".bin","",gtdbtk.bac120$user_genome)
 
+bin.gtdbtk.bac120 <- merge(drep_all_95.Cdb.csv[,c("secondary_cluster","bin")],
+                           gtdbtk.bac120[,c("user_genome","classification","bin")],by='bin')
+
+bin.gtdbtk.bac120%>%filter(secondary_cluster%in%loading$label[1:6])
+bin.gtdbtk.bac120%>%filter(secondary_cluster%in%loading$label[7:9])
+```
+191_1:    d__Bacteria;p__Proteobacteria;c__Gammaproteobacteria;o__UBA4486;f__UBA4486;g__SMWN01;s__SMWN01 sp004356415
+1471_1:   d__Bacteria;p__Proteobacteria;c__Alphaproteobacteria;o__;f__;g__;s__
+2340_0:   d__Bacteria;p__Zixibacteria;c__MSB-5A5;o__GN15;f__FEB-12;g__B120-G9;s__
+
+191_1:    变形菌门；γ-变形菌纲
+1471_1:   变形菌门；α-变形菌纲
+2340_0:   河床菌门；
+
+### Top10 distribution
+```{r}
+top10.taxon <- loading[1:10,c("label","x","y")]
+top10.taxon$domain <- c(rep("Archaea",6),rep("Bacteria",3),"Archaea")
+top10.taxon$class <- c("Nitrososphaeria","Nanoarchaeia","Nanoarchaeia",
+                       rep("Nitrososphaeria",3),"Gammaproteobacteria",
+                       "Alphaproteobacteria","Zixibacteria;MSB-5A5","Nitrososphaeria")
+top10.taxon$contributes <- seq(1,10)
+top10.taxon$taxon <- factor(paste0("top",top10.taxon$contributes,":",top10.taxon$class,":",top10.taxon$MAGID),
+                            levels=paste0("top",top10.taxon$contributes,":",top10.taxon$class,":",top10.taxon$MAGID))
+
+
+top10.prf.mdf <- melt(as.matrix(p.prf[which(rownames(p.prf)%in%top10.taxon$label),]))
+pca.cluster <- as.data.frame(g.pam$clustering)
+pca.cluster$fmtID <- rownames(pca.cluster)
+colnames(pca.cluster)[1] <- "PCA.cluster"
+
+colnames(top10.prf.mdf) <- c("MAGID","fmtID","FPKM")
+
+top10.mdf <- merge(
+  merge(top10.prf.mdf,top10.taxon,by.x="MAGID",by.y="label"),
+  merge(mdf,pca.cluster,by="fmtID"),by="fmtID")
+```
+
+```{r}
+ggplot(top10.mdf,aes(x=FPKM,color=taxon)) + 
+  geom_density() + scale_x_log10()
+```
+```{r}
+ggplot(top10.mdf,aes(x=PCA.cluster,y=FPKM,fill=factor(PCA.cluster))) + 
+  geom_violin() + geom_boxplot(width=.2) + scale_y_log10() + facet_wrap(.~taxon,scale="free",ncol=5) +
+  theme_bw() + scale_fill_brewer(palette="Set1") +
+  stat_compare_means(label = "p.signif")
+```
+
+```{r}
+table(top10.mdf$PCA.cluster,top10.mdf$Location)/10
+
+ggplot(top10.mdf,aes(x=PCA.cluster,y=..count../10)) + geom_bar(aes(fill=factor(PCA.cluster))) + 
+  facet_grid(.~Location) + theme_bw() + scale_fill_brewer(palette="Set1")
+```
+
+聚类分布有以下特征：
+- 菲律宾海盆南部几乎以C1为主；
+- 菲律宾海盆南北部以C1为主，少量C2，几乎无C3；
+- 马沟东部以C1为主，C3次之，极少C2；
+- 马沟西部几乎均为C3类型
+
+此外，C3在马沟区域比例明显高于菲律宾海盆地区，提示C3可能是马沟特有的群落结构。
+马沟西部完全没有观察到C2类型的样本，可能跟该地区的生境有所关联。
+
+
+```{r}
+ggplot(top10.mdf%>%filter(contributes<5),aes(x=contributes,y=FPKM,fill=taxon)) + geom_boxplot() + 
+  facet_grid(.~Location) + theme_bw() + scale_y_log10() + stat_compare_means(label = "p.signif")
 ```
 
 
-# MAGs profile
+
+
+#Fin.
+# ##########
+
+# Kraken2 profile
 
 
 Check `README.md` for more details how I careated the following profiles.
@@ -432,7 +526,7 @@ pheatmap(sams.cor,annotation_col =
          show_rownames = F, show_colnames = F)
 ```
 
-# MGA taxonomic identification
+# Kraken2 taxonomic identification
 ```{r}
 kk2.all.benchmark.tsv <- read.table(
   "taxon/all_passed_bins.kraken2.benchmark.tsv",

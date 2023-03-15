@@ -252,13 +252,13 @@ sbatch scripts/fpkm.MAG95.slurm
 perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
   ($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
   if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++; $s++;$l=1; 
-  open(FH, "< depth/$base.d95.MAG.fpkm");
+  open(FH, "< depth/$base.d95.MAG.fpkm");<FH>;
   while(<FH>){chomp;@FS=split; $HS{V}{$FS[0]}{$base} = $FS[4]; 
     $HS{R}{$FS[0]}{C} ++ if $FS[4] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
     $HS{C}{$base}{C} ++ if $FS[4] > 0;  $HS{C}{$base}{S} += $FS[4]; $l++;
   }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
-  END{print STDERR "\nSummarizing ... \r"; open R,">profiles/MEER1225.d95.fpkm.MAG.row.stat"; 
-    open C,">profiles/MEER1225.d95.fpkm.MAG.col.stat"; open V,">profiles/MEER1225.d95.fpkm.MAG.profile";
+  END{print STDERR "\nSummarizing ... \r"; open R,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.row.stat.gz"; 
+    open C,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.col.stat.gz"; open V,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.profile.gz";
     print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
     print V "OTU"; foreach $c (sort keys %{$HS{C}}){
       print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
@@ -273,7 +273,7 @@ perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
     };print STDERR "\nDONE\n"
   }' tmp/tmp.R1.lst
 
-ls profiles/MEER1225.d95.fpkm.MAG.*|xargs -n1 bgzip
+ls profiles/MEER1225.d95.fpkm.MAG.*|grep -E -v "dvc|gz"|xargs -n1 bgzip
 dvc add profiles/MEER1225.d95.fpkm.MAG.*.gz
 ```
 
@@ -291,43 +291,16 @@ vamb --outdir VAMB10 --fasta drep_all/all_passed_bins.10.fasta --jgi jgi/jgi.abu
 ### Taxonomic classify
 
 ```bash
-export K2DB_PF="/dssg/home/acct-trench/trench-1/USER/fangchao/tools/kraken2DB_pluspf_20221209"
-
-kraken2 --db $K2DB_PF --threads 64 --report taxon/all_passed_bins.kreport2 drep_all/all_passed_bins.rename.fasta > taxon/all_passed_bins.kraken2
-```
-
-```bash
-cut -f1-4 taxon/all_passed_bins.kraken2 | bgzip -@ 4 -c > taxon/all_passed_bins.kraken2.brief.gz
-
-perl scripts/kk2rank.pl \
-  /mnt/x/k2_pluspf_20221209/inspect.txt \
-  taxon/all_passed_bins.kraken2.brief.gz \
-  |bgzip -@ 4 -c > taxon/all_passed_bins.kraken2.detail.gz
-
-perl scripts/binTaxonBench.pl VAMB/clusters.tsv.gz \
-  taxon/all_passed_bins.kraken2.detail.gz \
-  > taxon/all_passed_bins.kraken2.benchmark.tsv
-
-for i in {S,G,F,O,C,P};do 
-perl scripts/binTaxonBench.pl $i VAMB/clusters.tsv.gz \
-  taxon/all_passed_bins.kraken2.detail.gz \
-  > taxon/all_passed_bins.kraken2.$i.benchmark.tsv &
-done
-``` 
-
-To improve the completeness, try using drep dataset.
-
-```bash
-zcat drep_all/all_passed_bins.rename.fasta.gz|grep ">" |sed 's/>//' > drep_all/all_passed_bins.rename.lst
-zcat drep_all/drep_all_95.rename.fasta.gz|grep ">"|sed 's/>//' > drep_all/drep_all_95.rename.lst
-zcat drep_all/drep_all_99.rename.fasta.gz|grep ">"|sed 's/>//' > drep_all/drep_all_99.rename.lst
-
-for i in {S,G,F,O,C,P};do 
-perl scripts/binTaxonBench.pl $i VAMB/clusters.tsv.gz \
-  taxon/all_passed_bins.kraken2.detail.gz drep_all/drep_all_95.rename.lst\
-  > taxon/drep_95.kraken2.$i.benchmark.tsv &
-done
-
+perl -e 'my $MAP_FILE="drep_all/drep_all_95.Widb.csv";
+open M, ($MAP_FILE =~ /.gz$/)?"bgzip -dc $MAP_FILE|":"<$MAP_FILE" or die $!;
+my $MAP_header = <M>;
+chomp($MAP_header);
+my @MAP_heads = split(/,/,$MAP_header);
+my @cluster_index = grep {$MAP_heads[$_] eq "cluster"}  0..$#MAP_heads;
+while(<M>){chomp; my @F = split /,/;
+    $F[0] =~ /^(\S+)\.bin\.(\S+)\.fa$/;
+    print "$1.$2\t$F[$cluster_index[0]]\n";
+}' > drep_all/drep_all_95.binmap.tsv
 ```
 
 Try Zewei's binners
