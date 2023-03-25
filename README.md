@@ -367,9 +367,9 @@ perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F
     $HS{C}{$sample}{C} ++ if $FS[5] > 0;  $HS{C}{$sample}{S} += $FS[5]; $l++;
   }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
   END{print STDERR "\nSummarizing ... \r"; 
-  open R,"|bgzip -c >profiles/MEER1195.fungi.fpkm.row.stat.gz"; 
-  open C,"|bgzip -c >profiles/MEER1195.fungi.fpkm.col.stat.gz";
-  open V,"|bgzip -c >profiles/MEER1195.fungi.fpkm.profile.gz";
+  open R,"|bgzip -c >profiles/MEER1194.fungi.fpkm.row.stat.gz"; 
+  open C,"|bgzip -c >profiles/MEER1194.fungi.fpkm.col.stat.gz";
+  open V,"|bgzip -c >profiles/MEER1194.fungi.fpkm.profile.gz";
     print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
     print V "OTU"; foreach $c (sort keys %{$HS{C}}){
       print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
@@ -384,7 +384,7 @@ perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F
     }; print STDERR "\nDONE\n";
   }' tmp/base.name.lst
 
-dvc add profiles/MEER1195.fungi.fpkm.{{col,row}.stat,profile}.gz
+dvc add profiles/MEER1194.fungi.fpkm.{{col,row}.stat,profile}.gz
 
 ```
 ### Taxonomic classiy
