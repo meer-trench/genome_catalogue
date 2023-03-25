@@ -13,7 +13,7 @@ while(<S>){
 close S;
 
 my $N = $STAT{'raw total sequences'};
-open J,"<$JGI_FILE" or die $!;
+open J,"<$JGI_FILE" or die "cannot open $JGI_FILE ".$!;
 $_=<J>;chomp; my @HEADS = split (/\t/,$_);
 print $_."\tFPKM\n";
 while(<J>){

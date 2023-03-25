@@ -180,18 +180,36 @@ perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/
   close FH;' tmp/tmp.R1.lst
 
 sbatch scripts/stat.slurm
+```
 
-perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
-  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
+patch to unify sample naming：
+```bash
+perl -ane 'BEGIN{print "sample\tbase\told_base\n"};($base=`basename $F[0]`)=~s/_R1.fq.gz//;
+  chomp($base);
+  $old = $base;
+  $base =~ s/_$//g;$base =~ s/_/-/g;
+  $sample = $base;
+  if(exists $HS{$old}){ $old .= ".1"; $base .= ".1";}; $HS{$old}++;
+  if(exists $BS{$base}){ $base .= ".1";}; $BS{$base}++;
+  print "$sample\t$base\t$old\n"' tmp/tmp.R1.lst > tmp/base.name.lst
+sed -i 's/^FDZ064-BuG10-12-7/FDZ064-BuG10-12/' base.name.lst
+
+perl -ane 'chomp; $old=$F[2]; $base=$F[1]; $sample=$F[0];
+  `mv depth/$old.d95.MAG.fpkm depth/$base.d95.MAG.fpkm`;
+  ' base.name.lst
+
+perl -ane 'chomp; next if $F[0] eq "sample";
+  $old=$F[2]; $base=$F[1]; $sample=$F[0]; $array++;
   open(FH, "> tmp/fpkm.$array.sh");
-  print FH "perl scripts/fpkm_cal.pl 150 bowtie2/$base.d95.stat depth/$base.d95.raw.jgi > depth/$base.d95.fpkm\n";
-  close FH;' tmp/tmp.R1.lst
+  print FH "perl scripts/fpkm_cal.pl 150 bowtie2/$old.d95.stat depth/$old.d95.raw.jgi > depth/$base.d95.fpkm\n";
+  close FH;' tmp/base.name.lst
 
 sbatch scripts/fpkm.slurm
+```
 
-perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
-  ($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
-  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++; $s++;$l=1; 
+```bash
+perl -ane 'chomp; $old=$F[2]; $base=$F[1]; $sample=$F[0];
+  $array++; $s++;$l=1; 
   open(FH, "< depth/$base.d95.fpkm");
   while(<FH>){chomp;@FS=split; $HS{V}{$FS[0]}{$base} = $FS[4]; 
     $HS{R}{$FS[0]}{C} ++ if $FS[4] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
@@ -211,7 +229,7 @@ perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
       print V "\n";
       print STDERR "Summarizing $l / $M \r";
     };print STDERR "\nDONE\n"
-  }' tmp/tmp.R1.lst
+  }' base.name.lst
 
 ```
 This will generate `profiles/MEER1225.fpkm.profile` wiht FPKM of all 1225 samples. The FPKM was calculated from coverage by using `jgi_summarize_bam_contig_depths`. This is a method from Maxbat2.
@@ -239,12 +257,13 @@ $$
 Where $N$ is total number of reads sequenced.
 
 ‍Get MAG profile:
+
 ```bash
-perl -ane '($base=`basename $F[0]`)=~s/_R1.fq.gz//;chomp($base); ($p2=$F[0])=~s/R1.fq/R2.fq/;
-  if(exists $HS{$base}){$base .= ".1"}; $array++; $HS{$base}++;
+perl -ane 'chomp; $old=$F[2]; $base=$F[1]; $sample=$F[0];
+  $array++; $HS{$base}++; $s++;$l=1; 
   open(FH, "> tmp/MAG95.$array.sh");
   print FH "perl scripts/MAG_cal.pl 150 profiles/MEER1225.fpkm.row.stat.gz drep_all/drep_all_95.Widb.csv depth/$base.d95.fpkm > depth/$base.d95.MAG.fpkm\n";
-  close FH;' tmp/tmp.R1.lst
+  close FH;' base.name.lst
 
 sbatch scripts/fpkm.MAG95.slurm
 
@@ -287,8 +306,88 @@ vamb -p 60 --outdir VAMB --fasta drep_all/all_passed_bins.rename.fasta --jgi jgi
 vamb --outdir VAMB10 --fasta drep_all/all_passed_bins.10.fasta --jgi jgi/jgi.abundance.10.dat 
 
 ```
+### Adding fungi profile from Zewei
+```bash
+perl -e 'open I,"< profiles/fungi.jgi.depth.tsv";
+$head = <I>; chomp($head); @heads = split(/\t/,$head);
+for ($i=0;$i<$#heads;$i++){ if($heads[$i] =~ /sorted.bam$/){
+  $heads[$i] =~ s/.sorted.bam//; 
+  $heads[$i] =~ s/_//; 
+  $HS{$i} = $heads[$i];
+}};
+while(<I>){
+  chomp;
+  @FS = split /\t/;
+  $INDEX{$FS[0]}{len} = $FS[1];
+  $INDEX{$FS[0]}{avg} = $FS[2];
+  foreach $i(sort {$a<=>$b} keys %HS){
+    $HS{$i}{$FS[0]}{dep} = $FS[3];
+    $HS{$i}{$FS[0]}{var} = $FS[3];
+  }
+}
+foreach $i(sort {$a<=>$b} keys %HS){
+  open I,"> depth/$HS{$i}.fungi.jgi";
+  print I "contigName\tcontigLen\ttotalAvgDepth\t$HS{$i}.fungi.bam\t$HS{$i}.fungi.bam-var\n";
+  foreach $c(sort keys %INDEX){
+    print I "$c\t$INDEX{$c}{len}\t$INDEX{$c}{avg}\t";
+    print I "$HS{$i}{$c}{dep}\t$HS{$i}{$c}{var}\n";
+  }
+  close I;
+}'
 
-### Taxonomic classify
+mkdir bowtie2/sample.stat
+perl -ane 'chomp; $old=$F[2]; $base=$F[1]; $sample=$F[0];
+  open I,"<bowtie2/$old.d95.stat";
+  while(<I>){chomp;@FS=split /:\s+/;$HS{$sample}{$FS[0]} +=$FS[1]};
+  close I;
+  END{
+    foreach $s(keys %HS){
+      open O,">bowtie2/sample.stat/$s.d95.stat";
+      foreach $k (keys %{$HS{$s}}){
+        print O "$k: $HS{$s}{$k}\n";
+      }
+      close O;
+    }
+  }
+' tmp/base.name.lst
+
+perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F[0]; $array++;
+  `perl scripts/fpkm_cal.pl 150 bowtie2/sample.stat/$sample.d95.stat depth/$sample.fungi.jgi > depth/$base.fungi.fpkm`;
+' tmp/base.name.lst
+
+# get MAG profile
+
+perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F[0];
+  next if exists $HS{C}{$sample};
+  $array++; $s++;$l=1;
+  open(FH, "< depth/$sample.fungi.fpkm");
+  while(<FH>){chomp;@FS=split; next if $FS[0] eq "contigName";
+    $HS{V}{$FS[0]}{$sample} = $FS[5]; 
+    $HS{R}{$FS[0]}{C} ++ if $FS[5] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
+    $HS{C}{$sample}{C} ++ if $FS[5] > 0;  $HS{C}{$sample}{S} += $FS[5]; $l++;
+  }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
+  END{print STDERR "\nSummarizing ... \r"; 
+  open R,"|bgzip -c >profiles/MEER1195.fungi.fpkm.row.stat.gz"; 
+  open C,"|bgzip -c >profiles/MEER1195.fungi.fpkm.col.stat.gz";
+  open V,"|bgzip -c >profiles/MEER1195.fungi.fpkm.profile.gz";
+    print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
+    print V "OTU"; foreach $c (sort keys %{$HS{C}}){
+      print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
+    }; print V "\n"; $l=0;
+    foreach $r (sort keys %{$HS{R}}){
+      print R "$r\t$HS{R}{$r}{L}\t$HS{R}{$r}{C}\n"; print V "$r"; $l++;
+      foreach $c (sort keys %{$HS{C}}){
+        print V "\t$HS{V}{$r}{$c}";
+      }
+      print V "\n";
+      print STDERR "Summarizing $l / $M \r";
+    }; print STDERR "\nDONE\n";
+  }' tmp/base.name.lst
+
+dvc add profiles/MEER1195.fungi.fpkm.{{col,row}.stat,profile}.gz
+
+```
+### Taxonomic classiy
 
 ```bash
 perl -e 'my $MAP_FILE="drep_all/drep_all_95.Widb.csv";
