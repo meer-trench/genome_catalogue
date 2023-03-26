@@ -27,22 +27,22 @@ library(plotly)
 
 ```
 
-# Metadata
+# 0.Metadata
 
 ```{r}
 metadata.df <- read_excel("./TS21-merged-metadata.xlsx","subset",
     col_types=c(
       "numeric","text","numeric","numeric","numeric",
-      "text","text","date","text","text","numeric","numeric",
-      "text","numeric","numeric","numeric","numeric","numeric","numeric"),
+      "text","text","date","text","text","text","text","numeric","numeric",
+      "text"),
     na="NA")
 
+metadata.df$pushcore <- sub("(|[0-3])[0-9]\\-\\d+","", metadata.df$fmtID,perl=T)
 metadata.df$fmtID <- gsub("-",".",metadata.df$fmtID,fixed = T)
-metadata.df$fmtID <- gsub("[()]","_",metadata.df$fmtID,perl=T)
+metadata.df$fmtID <- gsub("[()]",".",metadata.df$fmtID,perl=T)
 metadata.df$Depth <- - metadata.df$Depth
 metadata.df$Collect_date <- as.POSIXlt(metadata.df$Collect_date,
                                        formats = "%Y-%m-%d")
-
 metadata.df$day <- as.numeric(difftime(metadata.df$Collect_date,"2021-08-21 8:0:0",units="days"))
 
 summary(metadata.df)
@@ -88,10 +88,17 @@ fig4 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth,
 
 fig4
 ```
-
-# MAG fpkm profile
+## Location
 ```{r}
-p.prf <- read.table(gzfile("profiles/MEER1225.d95.fpkm.MAG.profile.gz"),
+metadata.df$Collect_loc.s <- substr(metadata.df$Location,1,1)
+fig5 <- plot_ly(metadata.df, x=~Longitude, y=~Latitude, z= ~ Depth, 
+                color= ~Location)
+fig5
+```
+# 1.MAG fpkm profile
+
+```{r}
+p.prf <- read.table(gzfile("profiles/MEER1194.d95.fpkm.MAG.profile.gz"),
                     header=T,row.names = 1)
 
 p.shannon <- data.frame(
@@ -110,7 +117,7 @@ ggplot(mdf,aes(x=MAG.shannon,color=Location)) + geom_density() + theme_bw()
 ggplot(mdf,aes(x=MAG.simpson,color=Location)) + geom_density() + theme_bw()
 ggplot(mdf,aes(x=MAG.invsimpson,color=Location)) + geom_density() + theme_bw()
 ```
-总体分布上来看，大部分样本的shannon index可以达到4以上。马沟西部整体丰富度最高，马沟东部次之。
+总体分布上来看，大部分样本的shannon index可以达到4以上。雅浦海沟整体丰富度最高，马沟东部次之。
 菲律宾海盆样本的多样性相对较低。
 
 ```{r}
@@ -242,8 +249,7 @@ bin.gtdbtk.ar53%>%filter(secondary_cluster%in%loading$label[1:6])
 
 
 ```{r}
-gtdbtk.bac120 <- read.table(gzfile("drep_all/drep_all_99.gtdbtk.bac120.summary.tsv.gz"),
-                            sep="\t",header = T)
+gtdbtk.bac120 <- read.table(gzfile("drep_all/drep_all_99.gtdbtk.bac120.summary.tsv.gz"),sep="\t",header = T)
 gtdbtk.bac120$bin <- gsub(".bin","",gtdbtk.bac120$user_genome)
 
 bin.gtdbtk.bac120 <- merge(drep_all_95.Cdb.csv[,c("secondary_cluster","bin")],
@@ -273,6 +279,7 @@ top10.taxon$taxon <- factor(paste0("top",top10.taxon$contributes,":",top10.taxon
 
 
 top10.prf.mdf <- melt(as.matrix(p.prf[which(rownames(p.prf)%in%top10.taxon$label),]))
+top10.prf.mdf$value <- as.numeric(top10.prf.mdf$value)
 pca.cluster <- as.data.frame(g.pam$clustering)
 pca.cluster$fmtID <- rownames(pca.cluster)
 colnames(pca.cluster)[1] <- "PCA.cluster"
@@ -306,10 +313,10 @@ ggplot(top10.mdf,aes(x=PCA.cluster,y=..count../10)) + geom_bar(aes(fill=factor(P
 - 菲律宾海盆南部几乎以C1为主；
 - 菲律宾海盆南北部以C1为主，少量C2，几乎无C3；
 - 马沟东部以C1为主，C3次之，极少C2；
-- 马沟西部几乎均为C3类型
+- 雅浦海沟几乎均为C3类型
 
 此外，C3在马沟区域比例明显高于菲律宾海盆地区，提示C3可能是马沟特有的群落结构。
-马沟西部完全没有观察到C2类型的样本，可能跟该地区的生境有所关联。
+雅浦海沟完全没有观察到C2类型的样本，可能跟该地区的生境有所关联。
 
 
 ```{r}
@@ -320,297 +327,319 @@ ggplot(top10.mdf%>%filter(contributes<5),aes(x=contributes,y=FPKM,fill=taxon)) +
 
 
 
+
+# 2.Fungal MAG fpkm profile
+
+```{r}
+f.prf <- read.table(gzfile("profiles/MEER1194.fungi.fpkm.profile.gz"),
+                    header=T,row.names = 1)
+f.stat <- read.table(gzfile("profiles/MEER1194.fungi.fpkm.row.stat.gz"),
+                    header=T,row.names = 1)
+
+f.stat$contig <- rownames(f.stat)
+f.prf$contig <- rownames(f.prf)
+
+f.mdf <- merge(
+  melt(f.prf,id.vars = "contig",variable.name = "sample",value.name = "FPKM"),
+  f.stat,by="contig")
+
+
+f.mdf$MAG <- ifelse(f.mdf$contig=="deepsea_asco_mitochondria@k141_44389","TheFungi.Mitochondrion","TheFungi.MAG")
+
+f.MAG.mdf <-ddply(f.mdf,c("sample","MAG"),summarise,FPKM=sum(FPKM*length)/sum(length))
+
+f.MAG.prf <- dcast(f.MAG.mdf,MAG~sample,value.var = "FPKM")
+
+f.MAG.mdf2 <- dcast(f.MAG.mdf,sample~MAG,value.var = "FPKM")
+f.MAG.mdf2$ratio <- f.MAG.mdf2$TheFungi.Mitochondrion/f.MAG.mdf2$TheFungi.MAG
+f.MAG.mdf2 <- merge(metadata.df,f.MAG.mdf2,by.x="fmtID",by.y="sample")
+```
+
+## correlation of mito&genome
+```{r}
+ggplot(f.MAG.mdf2,aes(x=TheFungi.MAG,y=TheFungi.Mitochondrion)) + 
+  geom_point() + theme_bw()
+
+ggplot(f.MAG.mdf2,aes(x=ratio)) + 
+  geom_density() + theme_bw()
+```
+
+```{r}
+f.MAG.mdf2$MMRatioGroup <- ifelse(
+  f.MAG.mdf2$ratio>100,
+  ifelse(f.MAG.mdf2$ratio>230,"round270","round170"),"round040")
+```
+```{r}
+ggplot(f.MAG.mdf2,aes(x=TheFungi.MAG,y=TheFungi.Mitochondrion)) + 
+  geom_point(aes(color=MMRatioGroup)) + theme_bw()
+
+ggplot(f.MAG.mdf2,aes(x=TheFungi.MAG,y=TheFungi.Mitochondrion)) + 
+  #geom_abline(slope = c(40,170,270),linetype=2,alpha=.3) +
+  stat_smooth(aes(group=MMRatioGroup),method = "lm", se = TRUE) +
+  stat_cor(label.x=30,method="spearman",aes(label.y=MMRatioGroup,group=MMRatioGroup)) +
+  geom_point(aes(color=MMRatioGroup)) + theme_bw() +
+  facet_wrap(~Location)
+```
+
+```{r}
+ggplot(f.MAG.mdf2,aes(x=ratio,fill=MMRatioGroup)) + 
+  geom_histogram() + theme_bw() + facet_wrap(~Location,scales = "free_y")
+
+ggplot(f.MAG.mdf2,aes(x=ratio,fill=MMRatioGroup)) + 
+  geom_histogram() + theme_bw() + facet_wrap(~Location.Notes,scales="free") +
+  theme(text=element_text(family="STHeiti"))
+```
+
+
+## PCA
+```{r}
+
+funBac.prf <- rbind(as.data.frame(p.prf[,-ncol(p.prf)]),as.data.frame(f.MAG.prf[1,-1,F]))
+
+funbac.gdf <- t(funBac.prf)
+funbac.gdf <- funbac.gdf[,which(colSums(funbac.gdf)>20)]
+funbac.gdf.pam <- pam(funbac.gdf, k=4)
+#plot(funbac.gdf.pam)
+
+#funBac.prf$taxid <- rownames(funBac.prf)
+
+pca2 <- autoplot(funbac.gdf.pam,data=as.data.frame(funbac.gdf),alpha=.3,
+               loadings=T,loadings.label=T,frame=T,frame.type="norm",
+               loadings.colour="black") + theme_bw()
+pca2
+```
+```{r}
+funbac.gdf.pam3 <- pam(funbac.gdf, k=3)
+#plot(funbac.gdf.pam)
+
+#funBac.prf$taxid <- rownames(funBac.prf)
+
+pca3 <- autoplot(funbac.gdf.pam3,data=as.data.frame(funbac.gdf),alpha=.3,
+               loadings=T,loadings.label=T,frame=T,frame.type="norm",
+               loadings.colour="black") + theme_bw()
+pca3
+```
+
+### PCA loading
+```{r}
+loadings <- layer_data(pca2,3)
+loadings$v <- loadings$x^2+loadings$y^2
+loading <- loadings[rev(order(loadings$v)),]
+head(loading,11)
+```
+### top11 taxons
+
+Additional fungi:
+d__Eukaryota; d1__Opisthokonta; k__Fungi; Dikarya; k1__Ascomycota; p__saccharomyceta; p1__Pezizomycotina; p2__leotiomyceta; p3__dothideomyceta; c__Dothideomycetes; c1__Dothideomycetidae; o__Myriangiales; f__Myriangiaceae; g__Myriangium;
+
+```{r}
+top11.taxon <- loading[1:11,c("label","x","y")]
+top11.taxon$domain <- c(rep("Archaea",3),"Eukaryota",rep("Archaea",3),
+                        rep("Bacteria",3),"Archaea")
+top11.taxon$class <- c("Nitrososphaeria","Nanoarchaeia","Nanoarchaeia","Dothideomycetes",
+                       rep("Nitrososphaeria",3),"Gammaproteobacteria",
+                       "Alphaproteobacteria","Zixibacteria;MSB-5A5","Nitrososphaeria")
+top11.taxon$contributes <- seq(1,11)
+top11.taxon$taxon <- factor(
+  paste0("top",top11.taxon$contributes,":",top11.taxon$class,":",top11.taxon$MAGID),
+  levels=paste0("top",top11.taxon$contributes,":",top11.taxon$class,":",top11.taxon$MAGID))
+
+
+top11.prf.mdf <- melt(
+  as.matrix(funBac.prf[which(rownames(funBac.prf)%in%top11.taxon$label),]))
+top11.prf.mdf$value <- as.numeric(top11.prf.mdf$value)
+pca.11.cluster <- as.data.frame(funbac.gdf.pam$clustering)
+pca.11.cluster$fmtID <- rownames(pca.11.cluster)
+colnames(pca.11.cluster)[1] <- "PCA.cluster"
+
+colnames(top11.prf.mdf) <- c("MAGID","fmtID","FPKM")
+
+top11.mdf <- merge(
+  merge(top11.prf.mdf,top11.taxon,by.x="MAGID",by.y="label"),
+  merge(f.MAG.mdf2,pca.cluster,by="fmtID"),by="fmtID") 
+```
+
+
+```{r,warning=F}
+ggplot(top11.mdf,aes(x=FPKM)) + geom_density(aes(color=factor(PCA.cluster))) +
+  facet_wrap(~taxon,scales="free") + scale_x_log10() + theme_bw()
+```
+```{r,warning=F}
+ggplot(top11.mdf,aes(x=Location.Notes,y=FPKM)) + geom_boxplot(aes(fill=Location.Notes)) +
+  facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_text(angle = -90,hjust=0))
+```
+```{r,warning=F}
+top11.mdf$loc3D <- paste(top11.mdf$Longitude,top11.mdf$Latitude,top11.mdf$Depth,sep=".")
+ggplot(top11.mdf%>%filter(grepl("南坡",Location.Notes)&No.dive=="FDZ066"),
+       aes(x=interaction(pushcore,loc3D),y=FPKM)) +
+  geom_boxplot(aes(fill=interaction(pushcore,loc3D))) +
+  geom_jitter() + stat_compare_means() +
+  facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_blank())
+
+ggplot(top11.mdf%>%filter(grepl("南坡",Location.Notes)&No.dive=="FDZ069"),
+       aes(x=interaction(pushcore,loc3D),y=FPKM)) +
+  geom_boxplot(aes(fill=interaction(pushcore,loc3D))) +
+  geom_jitter() + stat_compare_means() +
+  facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_blank())
+
+```
+### Cor with bac
+```{r}
+bac.metadata.df <- top10.mdf%>%filter(grepl("top1:",taxon))
+bac.metadata.df <- bac.metadata.df[,c(1,25:28)]
+
+f.MAG.mdf3 <- merge(bac.metadata.df,f.MAG.mdf2,by="fmtID")
+```
+
+```{r}
+funBac.top.prf <- funBac.prf[which(rownames(funBac.prf)%in%loading$label[1:11]),]
+funBac.top.cor <- cor(t(funBac.top.prf),method="s")
+
+pheatmap(funBac.top.cor,display_numbers = T)
+```
+```{r}
+library(ggpmisc)
+ggplot(f.MAG.mdf3,aes(x=TheFungi.MAG,y=MAG.shannon)) + 
+  geom_point(aes(color=MMRatioGroup)) + facet_wrap(~Location) +
+  stat_smooth(method = "lm", se = TRUE) +
+  stat_cor(label.y=0,method="spearman") +
+  theme_bw() + 
+  xlab("FPKM of The Fungi") +
+  ylab("prokaryotic microbiome shannon index")
+
+ggplot(f.MAG.mdf3,aes(x=TheFungi.MAG,y=MAG.shannon)) + 
+  geom_point(aes(color=MMRatioGroup)) + facet_wrap(~Location) +
+  scale_x_log10() + theme_bw() + 
+  xlab("FPKM of The Fungi") +
+  ylab("prokaryotic microbiome shannon index")
+```
+
+## PERMANOVA
+
+
+```{r}
+select.vars <- c("fmtID","Depth","Longitude","Latitude","Collector",
+                 "No.dive","Collect_loc","LayerDepth","LayerHeigth","day",
+                 "TheFungi.MAG","TheFungi.Mitochondrion","ratio")
+select.metadata.df <- f.MAG.mdf3[,select.vars]
+rownames(select.metadata.df) <- select.metadata.df$fmtID
+select.metadata.df <- select.metadata.df%>%filter(!is.na(Depth))
+
+select.samples <- intersect(
+  select.metadata.df$fmtID,
+  intersect(colnames(s2.prf),f.MAG.mdf3$fmtID))
+
+select.metadata.df <- select.metadata.df[select.samples,]
+select.metadata.df$Collect_loc[which(is.na(select.metadata.df$Collect_loc))] <- "Unk"
+select.metadata.df$LayerHeigth[which(is.na(select.metadata.df$LayerHeigth))] <- 0
+
+select.fpkm.prf <- s2.prf[,select.samples]
+
+select2.bymargin.permanova <- adonis2(
+  t(select.fpkm.prf[s2.contigs[1:4],]) ~ Longitude, data = select.metadata.df[,1:3])
+```
+
+```{r}
+select.vars <- c("fmtID","Depth","Longitude","Latitude","Collector",
+                 "No.dive","Collect_loc","LayerDepth","LayerHeigth","day",
+                 "TheFungi.MAG","TheFungi.Mitochondrion","ratio")
+select.metadata.df <- f.MAG.mdf3[,select.vars]
+rownames(select.metadata.df) <- select.metadata.df$fmtID
+select.metadata.df <- select.metadata.df%>%filter(!is.na(Depth))
+
+select.samples <- intersect(
+  select.metadata.df$fmtID,
+  intersect(colnames(p.prf),f.MAG.mdf3$fmtID))
+
+select.metadata.df <- select.metadata.df[select.samples,]
+select.metadata.df$Collect_loc[which(is.na(select.metadata.df$Collect_loc))] <- "Unk"
+select.metadata.df$LayerHeigth[which(is.na(select.metadata.df$LayerHeigth))] <- 0
+select.fpkm.prf <- p.prf[,select.samples]
+
+select.permanova.RData.file <- "./select.byterm.permanova.RData"
+if(file.exists(select.permanova.RData.file)){
+  load(select.permanova.RData.file)
+}else{
+  library(vegan)
+  
+  select.byterm.permanova <- adonis2(t(select.fpkm.prf) ~ Depth+Longitude+Latitude+Collector+No.dive+Collect_loc+LayerDepth+LayerHeigth+TheFungi.MAG+TheFungi.Mitochondrion+ratio, 
+                              by="term",
+                              data = select.metadata.df)
+  
+  select.bymargin.permanova <- adonis2(t(select.fpkm.prf) ~ Depth+Longitude+Latitude+Collector+No.dive+Collect_loc+LayerDepth+LayerHeigth+TheFungi.MAG+TheFungi.Mitochondrion+ratio, 
+                              by="margin",
+                              data = select.metadata.df)
+  save(select.byterm.permanova,select.bymargin.permanova,
+       file = select.permanova.RData.file)
+}
+```
+
+
+
+# 3.Circular DNA
+Choose represent contigs:  
+FDZ070-GBkY16-18.k141_555386
+FDZ072-WuWY8-10.k141_195567
+FDZ070-GBkY16-18.bin.38.fa      k141_555386     31556
+FDZ070-GBkY16-18.bin.38.fa      k141_771931     47277
+FDZ070-GBkY16-18.bin.38.fa      k141_49412      1085
+
+```{bash,eval=FALSE}
+bgzip -dc profiles/MEER1225.fpkm.profile.gz|grep -E "OTU|FDZ070-GBkY16-18|FDZ072-WuWY8-10" > profiles/MEER1225.select2.fpkm.prof
+```
+
+```{r}
+s2.prf <- read.table("profiles/MEER1225.select2.fpkm.prof",
+                    header=T,row.names = 1)
+s2.df <- as.data.frame(t(s2.prf))
+
+s2.contigs <- c("FDZ070-GBkY16-18.38.k141_555386",
+                "FDZ070-GBkY16-18.38.k141_771931",
+                "FDZ070-GBkY16-18.38.k141_49412",
+                "FDZ072-WuWY8-10.14.k141_195567")
+s2.df <- s2.df[,which(colnames(s2.df)%in%s2.contigs)]
+s2.df$sample <- rownames(s2.df)
+
+```
+
+```{r}
+p1 <- ggplot(s2.df,aes(x=`FDZ070-GBkY16-18.38.k141_555386`,
+                 y=`FDZ072-WuWY8-10.14.k141_195567`)) + 
+  geom_point() + stat_cor()
+
+p2 <- ggplot(s2.df,aes(x=`FDZ070-GBkY16-18.38.k141_555386`,
+                 y=`FDZ070-GBkY16-18.38.k141_771931`)) + 
+  geom_point() + stat_cor()
+
+p3 <- ggplot(s2.df,aes(x=`FDZ070-GBkY16-18.38.k141_555386`,
+                 y=`FDZ070-GBkY16-18.38.k141_49412`)) + 
+  geom_point() + stat_cor()
+
+p4 <- ggplot(s2.df,aes(x=`FDZ070-GBkY16-18.38.k141_771931`,
+                 y=`FDZ070-GBkY16-18.38.k141_49412`)) + 
+  geom_point() + stat_cor()
+
+cowplot::plot_grid(p1,p2,p3,p4)
+```
+
+
+## Cor with phe
+```{r}
+s2.MAG.mdf <- merge(f.MAG.mdf3,s2.df,by.x="fmtID",by.y="sample")
+
+the.cors <- cor(
+  s2.MAG.mdf[,c(2:5,7:9,17,18,20,22:24,26:29)],
+  method="s",use="complete.obs")
+pheatmap(the.cors,cluster_cols = F,cluster_rows = F)
+```
+```{r}
+funBac.prf
+```
+
 #Fin.
-# ##########
 
-# Kraken2 profile
-
-
-Check `README.md` for more details how I careated the following profiles.
-
-Load raw count profile
-```{r}
-#index
-refidx <- read.table("./drep_all/drep_all_95.rename.fasta.gz.fai",
-                     col.names = c("refID","length","chrPt","lineLen","LineLen2"))
-
-# raw bin count
-raw.bin.prof <- as.matrix(read.table(
-  gzfile("profiles/select11dives.d95.sum.bin.raw.count.gz")))
-samples <- colnames(raw.bin.prof)
-bins <- rownames(raw.bin.prof)
-```
-
-Get refid's bin ID:
-```{r}
-parse.one <- function(res, result) {
-  m <- do.call(rbind, lapply(seq_along(res), function(i) {
-    if(result[i] == -1) return("")
-    st <- result[i]
-    substring(res[i], st, st + attr(result, "match.length")[i] - 1)
-  }))
-  return(m)
-}
-
-refidx$bin <- as.character(parse.one(refidx$refID, 
-  regexpr("^.+\\.\\d+", refidx$refID, perl = TRUE)))
-```
-```{r}
-
-ggplot(refidx,aes(x=length)) + geom_density() + scale_x_log10()
-```
-
-filter metadata:
-```{r}
-select.metadata.df <- metadata.df%>%filter(fmtID%in%samples)
-select.samples <- select.metadata.df$fmtID
-select.bin.raw.prof <- 
-  raw.bin.prof[,colnames(raw.bin.prof)%in%select.samples]
-ggplot(select.metadata.df,aes(x=Location,y=Depth)) + geom_boxplot()
-
-```
-## Show location
-Specific set north/south slope sampling site of Mariana trench.
-
-```{r}
-select.metadata.df$slope <- ifelse(
-  select.metadata.df$No.dive=="FDZ064","NorthSlope",
-  ifelse(
-    select.metadata.df$No.dive%in%c("FDZ063","FDZ061"),"ravineBotton",
-    ifelse(
-      select.metadata.df$No.dive=="FDZ062","SouthSlope",NA
-    )
-  )
-)
-```
-
-
-```{r}
-repr.dive.df <- unique(select.metadata.df[,c("No.dive","Location","Longitude","Latitude")])
-
-repr.dive.df <- ddply(repr.dive.df,c("No.dive","Location"),summarize,
-                      Longitude=median(Longitude),Latitude=median(Latitude))
-
-ggplot(repr.dive.df,aes(x=Longitude,y=Latitude)) + 
-  geom_point(aes(color=No.dive)) +
-  geom_text(aes(label=No.dive),hjust=1) + theme_classic()
-
-if(do.write){
-  ggsave("figures/select.dives.map.pdf",width = 10,height=6)
-}
-ggplot(repr.dive.df%>%filter(grepl("Mar",Location)),aes(x=Longitude,y=Latitude)) + 
-  geom_point(aes(color=No.dive)) +
-  geom_text(aes(label=No.dive),hjust=1)
-```
-
-## Unmapping rate
-```{r}
-unmappedReads <- data.frame(
-  fmtID       = colnames(select.bin.raw.prof),
-  unmap.count = select.bin.raw.prof["UNMAPPED",],
-  all.count   = colSums(select.bin.raw.prof),
-  unmap.rate  = select.bin.raw.prof["UNMAPPED",]/colSums(select.bin.raw.prof))
-
-unmappedReads$mappingRate <- 1 - unmappedReads$unmap.rate
-
-unmap.merge.df <- merge(select.metadata.df,unmappedReads,by="fmtID")
-```
-
-```{r}
-ggplot(unmap.merge.df,aes(x=No.dive,y=mappingRate)) + 
-  geom_boxplot(aes(fill=No.dive)) + 
-  facet_grid(.~Location,scales = "free",space = "free") + ylim(c(0,1)) +
-  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0)) 
-```
-
-```{r}
-ggplot(unmap.merge.df%>%filter(!is.na(slope)),
-       aes(x=slope,y=mappingRate,fill=No.dive)) + geom_boxplot()
-```
-
-
-## Normalize profile
-```{r}
-library(dplyr)
-refBin <- ddply(refidx[,c("bin","length")],"bin",summarise,
-                seqs=length(bin),length=sum(length))
-
-select.bin.norm.prof <- select.bin.raw.prof[-nrow(select.bin.raw.prof),]
-select.bin.norm.prof <-
-  select.bin.norm.prof[order(rownames(select.bin.norm.prof)),]
-
-# Make sure the bin name orders are consistent
-length(which(rownames(select.bin.norm.prof)==refBin$bin)) ==nrow(select.bin.norm.prof)
-
-tmp <- 
-  apply(select.bin.norm.prof,2,function(x){x*150/refBin$length})
-select.bin.norm.prof <- 
-  apply(tmp,2,function(x){x/sum(x)})
-```
-
-```{r}
-p.0 <- ggplot(refBin,aes(x=seqs,y=length)) + geom_density2d() +
-  scale_x_continuous(breaks=seq(0,6)*100,limits=c(0,600)) + 
-  scale_y_continuous(breaks=seq(0,6)*1e6,limits=c(1e5,6e6)) + theme_bw()
-
-p.x <- ggplot(refBin,aes(x=seqs)) + geom_density() +
-  scale_x_continuous(breaks=seq(0,6)*100,limits=c(0,600)) + 
-  scale_y_reverse() + theme_bw()
-
-p.y <- ggplot(refBin,aes(x=..density..,y=length)) + geom_density() +
-  scale_y_continuous(breaks=seq(0,6)*1e6,limits=c(1e5,6e6)) + theme_bw()
-
-cowplot::plot_grid(p.0,p.y,p.x,rel_widths=c(3,1),rel_heights=c(3,1))
-```
-
-### alpha diversity
-```{r}
-library(vegan)
-
-select.bin.alpha <- data.frame(
-  fmtID=colnames(select.bin.norm.prof),
-  shannon = diversity(select.bin.norm.prof,"shannon",MARGIN = 2),
-  simpson = diversity(select.bin.norm.prof,"simpson",MARGIN = 2),
-  invsimpson = diversity(select.bin.norm.prof,"invsimpson",MARGIN = 2)
-  )
-
-select.bin.alpha.melt <- melt(select.bin.alpha,id.vars = "fmtID",
-                              variable.name = "method",value.name = "diversity")
-bin.alpha.merge.df <- merge(select.metadata.df,select.bin.alpha.melt,by="fmtID")
-
-```
-```{r}
-ggplot(bin.alpha.merge.df,aes(x=No.dive,y=diversity)) + 
-  geom_boxplot(aes(fill=No.dive)) + 
-  facet_grid(method~Location,scales = "free",space = "free_x") +
-  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0))
-```
-
-```{r}
-ggplot(bin.alpha.merge.df%>%filter(No.dive%in%c("FDZ061","FDZ063")),
-       aes(x=No.dive,y=diversity)) + 
-  geom_boxplot(aes(fill=No.dive)) + 
-  facet_grid(method~Location,scales = "free",space = "free_x") +
-  theme_bw() + theme(axis.text.x = element_text(angle=-90,hjust=0)) + 
-  stat_compare_means()
-```
-
-```{r}
-bin.alpha.merge.df <- bin.alpha.merge.df[order(bin.alpha.merge.df$LayerDepth),]
-ggplot(bin.alpha.merge.df,aes(x=LayerDepth,y=diversity)) + 
-  geom_path(aes(group=interaction(No.dive,Characteristics)),alpha=.7) +
-  geom_point(aes(color=interaction(No.dive,Characteristics))) +
-  facet_grid(method~Location,scales = "free",space = "free_x") +
-  theme_bw()
-```
-
-```{r}
-ggplot(bin.alpha.merge.df%>%filter(method=="shannon")) + 
-  geom_bar(stat="identity",aes(x=LayerDepth,y=diversity,fill=Location),width=2) +
-  facet_wrap(~Location+interaction(No.dive,Characteristics)) +
-  ylim(c(0,10)) + theme_bw()
-```
-
-## correlation
-```{r}
-library(pheatmap)
-bins.cor <- cor(t(select.bin.norm.prof))
-sams.cor <- cor(select.bin.norm.prof,method="spearman")
-
-sams.anno <- as.data.frame(select.metadata.df)
-rownames(sams.anno) <- sams.anno$fmtID
-sams.anno.color <- sams.anno[,c("Red","Green","Blue","Yellow","White","Black")]
-
-pheatmap(sams.cor,annotation_col =
-           sams.anno[,c("Depth","LayerDepth","Location"),F],
-         show_rownames = F, show_colnames = F)
-```
-
-# Kraken2 taxonomic identification
-```{r}
-kk2.all.benchmark.tsv <- read.table(
-  "taxon/all_passed_bins.kraken2.benchmark.tsv",
-  col.names = c("bin","seqs","length","S.p","S.c","G.p","G.c","F.p","F.c",
-                "O.p","O.c","C.p","P.c","P.p","P.c","K.p","K.c","D.p","D.c","R.p","R.c")
-  )
-
-kk2.all.S.benchmark.tsv <- read.table(
-  "taxon/all_passed_bins.kraken2.S.benchmark.tsv",
-  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
-  )
-
-bin.d99.S.benchmark.tsv <- read.table(
-  "taxon/drep_99.cluster.S.benchmark.tsv",
-  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
-  )
-gtdbtk.d99.S.benchmark.tsv <- read.table(
-  "taxon/drep_99.gtdbtk.S.benchmark.tsv",
-  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
-  )
-
-kk2.d95.S.benchmark.tsv <- read.table(
-  "taxon/drep_95.kraken2.S.benchmark.tsv",
-  col.names = c("bin","seqs","length","taxonID","TP","FP","FN","purify","completeness")
-  )
-
-kk2.all.classify.df <- read.table(
-  gzfile("taxon/all_passed_bins.kraken2.detail.gz"),
-  col.names = c("Classify","ID","RankID","length",
-                "Rank_S","Rank_G","Rank_F","Rank_O","Rank_C","Rank_P","Rank_K","Rank_D","Rank_R")
-  )
-
-```
-
-```{r}
-merge.df <- rbind(
-  data.frame(group="kk2.all",Rank="S",kk2.all.S.benchmark.tsv),
-  data.frame(group="cluster.d99",Rank="S",bin.d99.S.benchmark.tsv),
-  data.frame(group="gtdbtk.d99",Rank="S",gtdbtk.d99.S.benchmark.tsv),
-  data.frame(group="kk2.d95",Rank="S",kk2.d95.S.benchmark.tsv)
-)
-mean(kk2.all.S.benchmark.tsv$purify)
-mean(kk2.all.S.benchmark.tsv$completeness)
-
-length(which(kk2.all.S.benchmark.tsv$completeness>=0.5&kk2.all.S.benchmark.tsv$purify>0.9))
-
-ggplot(merge.df,aes(x=group,y=purify,fill=group)) + geom_boxplot() + theme_bw() + coord_flip() + 
-  scale_y_continuous(breaks=c(0,0.5,1),labels = c(0,50,100)) + xlab("Purity(%)")
-
-ggplot(merge.df,aes(x=group,y=completeness,fill=group)) + geom_boxplot() + theme_bw() + coord_flip() + 
-  scale_y_continuous(breaks=c(0,0.5,1),labels = c(0,50,100))
-```
-```{r}
-mean(kk2.d95.S.benchmark.tsv$purify)
-mean(kk2.d95.S.benchmark.tsv$completeness)
-
-length(which(kk2.d95.S.benchmark.tsv$completeness>=0.5&kk2.d95.S.benchmark.tsv$purify>0.9))
-
-```
-
-```{r}
-ggplot(kk2.all.S.benchmark.tsv,aes(x=purify,y=completeness)) + 
-  stat_density2d(geom="raster",contour = F,h=c(.5,.5))
-
-```
-```{r}
-mean(gtdbtk.d99.S.benchmark.tsv$purify)
-mean(gtdbtk.d99.S.benchmark.tsv$completeness)
-
-length(which(gtdbtk.d99.S.benchmark.tsv$completeness>=0.5&gtdbtk.d99.S.benchmark.tsv$purify>0.9))
-
-```
-
-```{r}
-ggplot(kk2.d95.S.benchmark.tsv,aes(x=purify)) + geom_boxplot()
-ggplot(kk2.d95.S.benchmark.tsv,aes(x=completeness)) + geom_boxplot()
-
-```
-
-
-
-### Curate
-```{r}
-kk2vamb.df <- merge()
-```
 
 
