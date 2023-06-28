@@ -42,10 +42,10 @@ for i in {FDZ081,FDZ077,FDZ064,FDZ050,FDZ060,FDZ036,FDZ041,FDZ033};do find /dssg
 ```
 found 284 samples, but 277 unique.
 
-# supp.
+## supp.
 for i in {FDZ061,FDZ062,FDZ063};do find /dssg/home/acct-trench/share/DATA/RAW_Merge -name "$i*R1.fq.gz";done > tmp/tmp.R1.lst
-## add 87 samples
 
+### add 87 samples  
 mapping:
 ```bash
 mkdir bowtie2
@@ -95,7 +95,7 @@ Visualization can be found in `VISUAL.Rmd`.
 
 
 
-# derep_95_path
+## derep_95_path
 ```bash
 cd  /dssg/home/acct-trench/share/DATA/CLEAN/
 
@@ -276,8 +276,10 @@ perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
     $HS{R}{$FS[0]}{C} ++ if $FS[4] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
     $HS{C}{$base}{C} ++ if $FS[4] > 0;  $HS{C}{$base}{S} += $FS[4]; $l++;
   }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
-  END{print STDERR "\nSummarizing ... \r"; open R,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.row.stat.gz"; 
-    open C,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.col.stat.gz"; open V,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.profile.gz";
+  END{print STDERR "\nSummarizing ... \r"; 
+    open R,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.row.stat.gz"; 
+    open C,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.col.stat.gz"; 
+    open V,"|bgzip -c >profiles/MEER1225.d95.fpkm.MAG.profile.gz";
     print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
     print V "OTU"; foreach $c (sort keys %{$HS{C}}){
       print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
@@ -294,6 +296,35 @@ perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
 
 ls profiles/MEER1225.d95.fpkm.MAG.*|grep -E -v "dvc|gz"|xargs -n1 bgzip
 dvc add profiles/MEER1225.d95.fpkm.MAG.*.gz
+```
+
+merge 1225 into 1194:
+```bash
+perl -ane 'BEGIN{%HS;$s=0;$l=0;$M=1;};
+  chomp; $old=$F[2]; $base=$F[1]; $sample=$F[0];
+  $array++; $s++;$l=1; 
+  open(FH, "< depth/$base.d95.MAG.fpkm");<FH>;
+  while(<FH>){chomp;@FS=split; $HS{V}{$FS[0]}{$sample} = $FS[4]; 
+    $HS{R}{$FS[0]}{C} ++ if $FS[4] > 0; $HS{R}{$FS[0]}{L} = $FS[1];
+    $HS{C}{$sample}{C} ++ if $FS[4] > 0;  $HS{C}{$sample}{S} += $FS[4]; $l++;
+  }; close FH; $M=$l if $l > $M; print STDERR "processed sample(#$s) \r"; 
+  END{print STDERR "\nSummarizing ... \r"; 
+    open R,"|bgzip -c >profiles/MEER1194.d95.fpkm.MAG.row.stat.gz"; 
+    open C,"|bgzip -c >profiles/MEER1194.d95.fpkm.MAG.col.stat.gz"; 
+    open V,"|bgzip -c >profiles/MEER1194.d95.fpkm.MAG.profile.gz";
+    print R "OTU\tlength\tcounts\n"; print C "sample\tsum\tcounts\n";
+    print V "OTU"; foreach $c (sort keys %{$HS{C}}){
+      print V "\t$c"; print C "$c\t$HS{C}{$c}{S}\t$HS{C}{$c}{C}\n";
+    }; print V "\n"; $l=0;
+    foreach $r (sort keys %{$HS{R}}){
+      print R "$r\t$HS{R}{$r}{L}\t$HS{R}{$r}{C}\n"; print V "$r"; $l++;
+      foreach $c (sort keys %{$HS{C}}){
+        print V "\t$HS{V}{$r}{$c}";
+      }
+      print V "\n";
+      print STDERR "Summarizing $l / $M \r";
+    };print STDERR "\nDONE\n"
+  }' tmp/base.name.lst
 ```
 
 vamb:
@@ -321,8 +352,8 @@ while(<I>){
   $INDEX{$FS[0]}{len} = $FS[1];
   $INDEX{$FS[0]}{avg} = $FS[2];
   foreach $i(sort {$a<=>$b} keys %HS){
-    $HS{$i}{$FS[0]}{dep} = $FS[3];
-    $HS{$i}{$FS[0]}{var} = $FS[3];
+    $HS{$i}{$FS[0]}{dep} = $FS[$i];
+    $HS{$i}{$FS[0]}{var} = $FS[$i+1];
   }
 }
 foreach $i(sort {$a<=>$b} keys %HS){
@@ -352,10 +383,10 @@ perl -ane 'chomp; $old=$F[2]; $base=$F[1]; $sample=$F[0];
 ' tmp/base.name.lst
 
 perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F[0]; $array++;
-  `perl scripts/fpkm_cal.pl 150 bowtie2/sample.stat/$sample.d95.stat depth/$sample.fungi.jgi > depth/$base.fungi.fpkm`;
+  `perl scripts/fpkm_cal.pl 150 bowtie2/sample.stat/$sample.d95.stat depth/$sample.fungi.jgi > depth/$sample.fungi.fpkm`;
 ' tmp/base.name.lst
 
-# get MAG profile
+# get contig profile
 
 perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F[0];
   next if exists $HS{C}{$sample};
@@ -386,6 +417,7 @@ perl -ane 'chomp; next if $F[0] eq "sample"; $old=$F[2]; $base=$F[1]; $sample=$F
 
 dvc add profiles/MEER1194.fungi.fpkm.{{col,row}.stat,profile}.gz
 
+
 ```
 ### Taxonomic classiy
 
@@ -400,6 +432,27 @@ while(<M>){chomp; my @F = split /,/;
     $F[0] =~ /^(\S+)\.bin\.(\S+)\.fa$/;
     print "$1.$2\t$F[$cluster_index[0]]\n";
 }' > drep_all/drep_all_95.binmap.tsv
+```
+
+```bash
+perl -e '
+  open FA,"< drep_all/all_passed_bins.rename.fasta" or die $!;
+  while(<FA>){
+    next unless />(\S+).(\d+).(k\d+\_\d+)/;
+    $HS{$1.$2}{$1.$2.$3} ++
+  }
+  close FA;
+  open M, "<drep_all/drep_all_95.Widb.csv" or die $!;
+  my $MAP_header = <M>;
+  chomp($MAP_header);
+  my @MAP_heads = split(/,/,$MAP_header);
+  my @cluster_index = grep {$MAP_heads[$_] eq "cluster"}  0..$#MAP_heads;
+  while(<M>){chomp; my @F = split /,/;
+      $F[0] =~ /^(\S+)\.bin\.(\S+)\.fa$/;
+      foreach $f (sort keys %{$HS{$1.$2}}){
+        print "$1.$2\t$F[$cluster_index[0]]\t$f\n";
+      }
+  }' > drep_all/drep_all_95.bin2contig.map.tsv
 ```
 
 Try Zewei's binners
@@ -450,7 +503,47 @@ perl scripts/binTaxonBench.pl $i taxon/drep99_cluster.lst.gz \
   > taxon/drep_99.cluster.$i.benchmark.tsv &
 done
 ```
+# Circular DNA benchmark
+Check how many circular DNAs in our MAGs
+```bash
+mkdir -p plasmid
+rsync -atvP trench@~/USER/songzewei/DATA/meer_v1_plasmid/circular_dna.fna plasmid/
 
+grep ">" plasmid/circular_dna.fna|sed 's/>//;s/fa@//'|\
+  awk -F '.' '{print $1"\t"$2"\t"$4}' > plasmid/circular_dna.ID.keys
+
+zcat profiles/MEER1225.fpkm.row.stat.gz |\
+  awk -F '.' '{print $1"\t"$2"\t"$3}' > profiles/MEER1225.fpkm.row.ID.keys
+
+cat plasmid/circular_dna.ID.keys profiles/MEER1225.fpkm.row.ID.keys |\
+  perl -ane '
+    if(exists $HS{$F[0]}{$F[2]}){
+      print $_;
+    }
+    $HS{$F[0]}{$F[2]} ++;
+  ' > plasmid/circular_dna.represented_MAGs.keys
+```
+Union of following records:
+358433 plasmid/circular_dna.ID.keys
+1474086 profiles/MEER1225.fpkm.row.ID.keys
+
+Found 1425 contigs of circular DNA represented in bins.
+```bash
+zcat < drep_all/drep_all_95.rename.fasta.gz | grep ">" |\
+  sed 's/>//' | awk -F '.' '{print $1"\t"$2"\t"$3}'|\
+  > profiles/drep_all_95.row.ID.keys
+
+cat plasmid/circular_dna.represented_MAGs.keys profiles/drep_all_95.row.ID.keys |\
+  perl -ane '
+    if(exists $HS{"$F[0].$F[1].$F[2]"}){
+      print $_;
+    }
+    $HS{"$F[0].$F[1].$F[2]"} ++;
+  ' > plasmid/circular_dna.represented_d95MAGs.keys
+
+cut -f1,2 plasmid/circular_dna.represented_MAGs.keys|sort|uniq -c|wcl
+```
+Found 1006 MAGs contained circular DNAs
 
 # test profile
 ```bash

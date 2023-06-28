@@ -14,7 +14,7 @@ while(<M>){
     my @F = split /,/;
     $F[0] =~ /^(\S+)\.bin\.(\S+)\.fa$/;
     $MAP{"$1.$2"}{"_cluster"} = $F[$cluster_index[0]];
-    $BINS{$F[$cluster_index[0]]} = "$1.$2";
+    $MAP{$F[$cluster_index[0]]}{"$1.$2"} ++;
 }
 close M;
 
@@ -23,22 +23,22 @@ while(<S>){
     chomp;
     my @F = split /\t/;
     $F[0] =~ /^(\S+)\.(\S+)\.(\S+)$/ or next;
-    $MAP{"$1.$2"}{$3} = $F[1];
-    $MAP{"$1.$2"}{"_sumLen"} += $F[1];
-    $MAP{"$1.$2"}{"_contigs"} ++;
+    my $cluster = $MAP{"$1.$2"}{"_cluster"};
+    $STAT{$cluster}{"_sumLen"} += $F[1];
+    $STAT{$cluster}{"_contigs"} ++;
 }
 close S;
 
-my $N = $STAT{'raw total sequences'};
 open P,"<$PROFILE" or die $!;
 $_=<P>;chomp; my @HEADS = split (/\t/,$_);
 while(<P>){
     chomp;
     my @F = split (/\t/,$_);
     $F[0] =~ /^(\S+)\.(\S+)\.(\S+)$/ or next;
-    $MAP{"$1.$2"}{"_sumFPKMxLEN"} += $F[1] * $F[4];
-    $MAP{"$1.$2"}{"_sumLen_counted"} += $F[1];
-    $MAP{"$1.$2"}{"_contigs_counted"} ++;
+    my $cluster = $MAP{"$1.$2"}{"_cluster"};
+    $BINS{$cluster}{"_sumFPKMxLEN"} += $F[1] * $F[4];
+    $BINS{$cluster}{"_sumLen"} += $F[1];
+    $BINS{$cluster}{"_contigs"} ++;
 }
 close P;
 
@@ -46,21 +46,20 @@ close P;
 $HEADS[2] = "contigs";
 $HEADS[3] = "theo_contigs";
 print join("\t",@HEADS)."\n";
-foreach my $bin (sort keys %BINS){
-    my $b = $BINS{$bin};
+foreach my $b (sort keys %BINS){
     my $fpkm = 0;
-    if($MAP{$b}{"_sumLen_counted"}>0){
-        $fpkm = $MAP{$b}{"_sumFPKMxLEN"} / $MAP{$b}{"_sumLen_counted"};
+    if($BINS{$b}{"_sumLen"}>0){
+        $fpkm = $BINS{$b}{"_sumFPKMxLEN"} / $BINS{$b}{"_sumLen"};
     }
-    if($MAP{$b}{"_contigs_counted"} ne $MAP{$b}{"_contigs"}){
-        print STDERR "$bin\($b\) mapped $MAP{$b}{_contigs} contigs, ";
-        print STDERR "but in practice $MAP{$b}{_contigs_counted} counted.\n";
+    if($BINS{$b}{"_contigs"} ne $STAT{$b}{"_contigs"}){
+        print STDERR "$b mapped $STAT{$b}{_contigs} contigs, ";
+        print STDERR "but in practice $BINS{$b}{_contigs} counted.\n";
     }
-    if($MAP{$b}{"_sumLen_counted"} ne $MAP{$b}{"_sumLen"}){
-        print STDERR "$bin\($b\) summed $MAP{$b}{_sumLen} bases, ";
-        print STDERR "but in practice $MAP{$b}{_sumLen_counted} summped.\n";
+    if($BINS{$b}{"_sumLen"} ne $STAT{$b}{"_sumLen"}){
+        print STDERR "$b summed $STAT{$b}{_sumLen} bases, ";
+        print STDERR "but in practice $BINS{$b}{_sumLen} summped.\n";
     }
-    printf("%s\t%d\t%d\t%d\t%.4e\n",$bin,$MAP{$b}{"_sumLen_counted"},
-    $MAP{$b}{"_contigs_counted"},$MAP{$b}{"_contigs"},$fpkm);
+    printf("%s\t%d\t%d\t%d\t%.4e\n",$b,$BINS{$b}{"_sumLen"},
+    $BINS{$b}{"_contigs"},$STAT{$b}{"_contigs"},$fpkm);
 }
 exit;

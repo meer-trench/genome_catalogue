@@ -22,14 +22,20 @@ if (!require(devtools)) install.packages("devtools")
 if (!require(ggvenn)) devtools::install_github("yanlinlin82/ggvenn")
 library(ggvenn)
 library(plotly)
+library(cluster)
+library(ggfortify)
 
 
-
+do.write <- F # Always false to avoid overwriting exported files.
 ```
 
 # 0.Metadata
 
 ```{r}
+MAG.represent <- read.csv("drep_all/drep_all_95.Widb.csv")
+MAG.genome <- strsplit(MAG.represent$genome,".",fixed = T)
+MAG.represent$ID <- sapply(MAG.genome, function(x) paste0(x[1],".",x[3]))
+MAG.represent$user_genome <- sub(".fa","",MAG.represent$genome)
 metadata.df <- read_excel("./TS21-merged-metadata.xlsx","subset",
     col_types=c(
       "numeric","text","numeric","numeric","numeric",
@@ -46,6 +52,40 @@ metadata.df$Collect_date <- as.POSIXlt(metadata.df$Collect_date,
 metadata.df$day <- as.numeric(difftime(metadata.df$Collect_date,"2021-08-21 8:0:0",units="days"))
 
 summary(metadata.df)
+```
+
+```{r,eval=FALSE onetime-curate}
+# Determine location
+No.dives <- unique(metadata.df$No.dive[which(!is.na(metadata.df$No.dive))])
+
+No.d_index <- which(!is.na(metadata.df$Longitude)&!is.na(metadata.df$No.dive))
+
+loc.df <- unique(data.frame(
+  No.dive=metadata.df$No.dive[No.d_index],
+  Longitude=round(metadata.df$Longitude[No.d_index],0),
+  Latitude=round(metadata.df$Latitude[No.d_index],0)))
+
+loc.df <- merge(
+  data.frame(No.dive=No.dives),loc.df,by="No.dive",all.x=T
+)
+
+loc.df$Location <- ifelse(
+  loc.df$Longitude > 136,
+  ifelse(loc.df$Longitude > 140,"Mar.Trench","Yap.Trench"),
+  ifelse(loc.df$Latitude > 14,"Phi.Basin.North","Phi.Basin.South")
+)
+
+loc.df$Location[which(loc.df$No.dive=="FDZ040")] <- "Phi.Basin.North"
+loc.df$Location[which(loc.df$No.dive=="FDZ052")] <- "Mar.Trench"
+
+loc.uniq.df <- merge(
+  metadata.df[,c("X","fmtID","No.dive")],
+  unique(loc.df[which(!is.na(loc.df$No.dive)),c("No.dive","Location")]),
+  by="No.dive",all.x=T
+)
+
+write.csv(loc.uniq.df[order(loc.uniq.df$X),],"./output/supp.location.fix.csv")
+
 ```
 
 ## No.dive
@@ -106,12 +146,82 @@ p.shannon <- data.frame(
   MAG.simpson=diversity(p.prf,"simpson",MARGIN=2),
   MAG.invsimpson=diversity(p.prf,"invsimpson",MARGIN=2)
 )
+
 p.shannon$fmtID <- rownames(p.shannon)
 
 mdf <-merge(metadata.df,p.shannon,by="fmtID")
 ```
 
-## Alpha diversity
+## Sampling alpha diversity
+```{r,warning=FALSE}
+
+prf.samples <- colnames(p.prf)
+prf.metadata <- metadata.df
+prf.metadata <- prf.metadata%>%filter(fmtID%in%prf.samples)
+rownames(prf.metadata) <- prf.metadata$fmtID
+prf.metadata <- prf.metadata[prf.samples,]
+
+size <- c(2^seq(0,10))
+Loc.name <- names(table(prf.metadata$Location))
+
+if(file.exists("sampling.alpha.output.RData")){
+  load("sampling.alpha.output.RData")
+}else{
+  save(size,Loc.name,prf.metadata,p.prf,file = "sampling.alpha.input.RData")
+  #Following codes are executed on HPC
+  library(vegan)
+  load("sampling.alpha.input.RData")
+  seed<-1
+  cum.alpha <- NULL
+  for(i in 1:1000){
+    for(j in Loc.name){
+      loc.samples <- prf.metadata$fmtID[which(prf.metadata$Location==j)]
+      i.cum.prf <- sapply(size,function(x){
+        if(length(loc.samples) >= x){ 
+          get.samples <- sample(loc.samples,x)
+          y <- rowMeans(p.prf[,get.samples,F])
+          return(y)
+        }else{
+          return(rep(NA,nrow(p.prf)))
+        }
+      })
+      colnames(i.cum.prf)<-size
+      i.cum.shannon <- data.frame(
+        MAG.shannon=diversity(i.cum.prf,"shannon",MARGIN=2),
+        MAG.simpson=diversity(i.cum.prf,"simpson",MARGIN=2),
+        MAG.invsimpson=diversity(i.cum.prf,"invsimpson",MARGIN=2)
+      )
+      i.cum.shannon$sampling <- rownames(i.cum.shannon)
+      i.cum.shannon$repeats <- i
+      i.cum.shannon$Location <- j
+      cum.alpha <- rbind(cum.alpha,i.cum.shannon)
+    }
+  }
+  save(cum.alpha,file = "sampling.alpha.output.RData")
+}
+
+#cum.alpha <- cum.alpha%>%filter(!is.na(MAG.shannon))
+cum.alpha.0 <- cum.alpha 
+cum.alpha.0$MAG.shannon[which(is.na(cum.alpha.0$MAG.shannon))] <- 0
+cum.alpha.0$MAG.simpson[which(is.na(cum.alpha.0$MAG.simpson))] <- 0
+cum.alpha.0$MAG.invsimpson[which(is.na(cum.alpha.0$MAG.invsimpson))] <- 0
+
+cum.alpha.0$sampling <- as.numeric(cum.alpha.0$sampling)
+ggplot(cum.alpha.0,aes(x=factor(sampling),y=MAG.shannon)) + 
+  geom_boxplot(aes(fill=Location)) + theme_classic() +
+  facet_grid(.~factor(sampling),scale="free",space="free") + 
+  theme(axis.text.x = element_text(angle=-90,hjust=0))
+
+p_shanoon_box <- ggplot(
+  cum.alpha.0%>%filter(sampling < 600),aes(x=factor(sampling),y=MAG.shannon)) + 
+  geom_boxplot(aes(fill=Location),stroke=.3,outlier.size=.5) + theme_bw()
+p_shanoon_box
+if(do.write){
+  ggsave("./output/p_shanoon_box.pdf",p_shanoon_box,width=5,height=5)
+}
+```
+
+
 ```{r}
 ggplot(mdf,aes(x=MAG.shannon,color=Location)) + geom_density() + theme_bw()
 ggplot(mdf,aes(x=MAG.simpson,color=Location)) + geom_density() + theme_bw()
@@ -169,12 +279,18 @@ ggplot(mdf%>%filter(No.dive%in%c("FDZ072","FDZ069","FDZ076")),
 
 
 
-## PCA
+### PCA
 
 ```{r}
-library(cluster)
-
 gdf <- t(p.prf)
+
+stat.gdf <- as.data.frame(colSums(gdf))
+ggplot(stat.gdf,aes(x=`colSums(gdf)`)) + geom_density() + scale_x_log10() +
+  annotation_logticks(breaks=10^seq(-1,4))
+```
+
+
+```{r}
 gdf1 <- gdf[,which(colSums(gdf)>20)]
 g.pam <- pam(gdf1, k=3)
 plot(g.pam)
@@ -182,7 +298,6 @@ plot(g.pam)
 
 
 ```{r}
-library(ggfortify)
 
 p.prf1 <- as.data.frame(p.prf)
 p.prf$taxid <- rownames(p.prf1)
@@ -282,7 +397,7 @@ top10.prf.mdf <- melt(as.matrix(p.prf[which(rownames(p.prf)%in%top10.taxon$label
 top10.prf.mdf$value <- as.numeric(top10.prf.mdf$value)
 pca.cluster <- as.data.frame(g.pam$clustering)
 pca.cluster$fmtID <- rownames(pca.cluster)
-colnames(pca.cluster)[1] <- "PCA.cluster"
+colnames(pca.cluster)[1] <- "PAM.Cluster"
 
 colnames(top10.prf.mdf) <- c("MAGID","fmtID","FPKM")
 
@@ -296,16 +411,16 @@ ggplot(top10.mdf,aes(x=FPKM,color=taxon)) +
   geom_density() + scale_x_log10()
 ```
 ```{r}
-ggplot(top10.mdf,aes(x=PCA.cluster,y=FPKM,fill=factor(PCA.cluster))) + 
+ggplot(top10.mdf,aes(x=PAM.Cluster,y=FPKM,fill=factor(PAM.Cluster))) + 
   geom_violin() + geom_boxplot(width=.2) + scale_y_log10() + facet_wrap(.~taxon,scale="free",ncol=5) +
   theme_bw() + scale_fill_brewer(palette="Set1") +
   stat_compare_means(label = "p.signif")
 ```
 
 ```{r}
-table(top10.mdf$PCA.cluster,top10.mdf$Location)/10
+table(top10.mdf$PAM.Cluster,top10.mdf$Location)/10
 
-ggplot(top10.mdf,aes(x=PCA.cluster,y=..count../10)) + geom_bar(aes(fill=factor(PCA.cluster))) + 
+ggplot(top10.mdf,aes(x=PAM.Cluster,y=..count../10)) + geom_bar(aes(fill=factor(PAM.Cluster))) + 
   facet_grid(.~Location) + theme_bw() + scale_fill_brewer(palette="Set1")
 ```
 
@@ -323,10 +438,6 @@ ggplot(top10.mdf,aes(x=PCA.cluster,y=..count../10)) + geom_bar(aes(fill=factor(P
 ggplot(top10.mdf%>%filter(contributes<5),aes(x=contributes,y=FPKM,fill=taxon)) + geom_boxplot() + 
   facet_grid(.~Location) + theme_bw() + scale_y_log10() + stat_compare_means(label = "p.signif")
 ```
-
-
-
-
 
 # 2.Fungal MAG fpkm profile
 
@@ -348,11 +459,15 @@ f.mdf$MAG <- ifelse(f.mdf$contig=="deepsea_asco_mitochondria@k141_44389","TheFun
 
 f.MAG.mdf <-ddply(f.mdf,c("sample","MAG"),summarise,FPKM=sum(FPKM*length)/sum(length))
 
-f.MAG.prf <- dcast(f.MAG.mdf,MAG~sample,value.var = "FPKM")
 
+f.MAG.prf <- dcast(f.MAG.mdf,MAG~sample,value.var = "FPKM")
+if(do.write){
+  write.table(f.MAG.prf,"./profiles/MEER1194.fungi.MAG.fpkm.profile.tsv",
+              quote = F)
+}
 f.MAG.mdf2 <- dcast(f.MAG.mdf,sample~MAG,value.var = "FPKM")
 f.MAG.mdf2$ratio <- f.MAG.mdf2$TheFungi.Mitochondrion/f.MAG.mdf2$TheFungi.MAG
-f.MAG.mdf2 <- merge(metadata.df,f.MAG.mdf2,by.x="fmtID",by.y="sample")
+f.MAG.mdf2 <- merge(mdf,f.MAG.mdf2,by.x="fmtID",by.y="sample")
 ```
 
 ## correlation of mito&genome
@@ -362,12 +477,17 @@ ggplot(f.MAG.mdf2,aes(x=TheFungi.MAG,y=TheFungi.Mitochondrion)) +
 
 ggplot(f.MAG.mdf2,aes(x=ratio)) + 
   geom_density() + theme_bw()
+
+ggplot(f.MAG.mdf2,aes(x=ratio,color=Location)) + 
+  geom_density() + theme_bw() +
+  geom_vline(xintercept = c(40,170,275),linetype=2) +
+  ggtitle("Ratio distribution of the fungal Mitochondrion/Genome")
 ```
 
 ```{r}
 f.MAG.mdf2$MMRatioGroup <- ifelse(
   f.MAG.mdf2$ratio>100,
-  ifelse(f.MAG.mdf2$ratio>230,"round270","round170"),"round040")
+  ifelse(f.MAG.mdf2$ratio>230,"~275","~170"),"~040")
 ```
 ```{r}
 ggplot(f.MAG.mdf2,aes(x=TheFungi.MAG,y=TheFungi.Mitochondrion)) + 
@@ -383,125 +503,555 @@ ggplot(f.MAG.mdf2,aes(x=TheFungi.MAG,y=TheFungi.Mitochondrion)) +
 
 ```{r}
 ggplot(f.MAG.mdf2,aes(x=ratio,fill=MMRatioGroup)) + 
-  geom_histogram() + theme_bw() + facet_wrap(~Location,scales = "free_y")
+  geom_histogram() + theme_bw() + facet_wrap(~Mar.location,scales = "free_y")
 
 ggplot(f.MAG.mdf2,aes(x=ratio,fill=MMRatioGroup)) + 
-  geom_histogram() + theme_bw() + facet_wrap(~Location.Notes,scales="free") +
+  geom_histogram() + theme_bw() + facet_wrap(~Mar.location,scales="free") +
   theme(text=element_text(family="STHeiti"))
 ```
 
 
 ## PCA
+
+### PAM method
 ```{r}
 
 funBac.prf <- rbind(as.data.frame(p.prf[,-ncol(p.prf)]),as.data.frame(f.MAG.prf[1,-1,F]))
 
 funbac.gdf <- t(funBac.prf)
 funbac.gdf <- funbac.gdf[,which(colSums(funbac.gdf)>20)]
-funbac.gdf.pam <- pam(funbac.gdf, k=4)
+funbac.gdf.pam <- pam(funbac.gdf, k=5)
 #plot(funbac.gdf.pam)
 
 #funBac.prf$taxid <- rownames(funBac.prf)
-
+cluster.color <- RColorBrewer::brewer.pal(11,"Spectral")[c(1,3,7,9,11)]
 pca2 <- autoplot(funbac.gdf.pam,data=as.data.frame(funbac.gdf),alpha=.3,
                loadings=T,loadings.label=T,frame=T,frame.type="norm",
-               loadings.colour="black") + theme_bw()
+               loadings.colour="black") + theme_bw() +
+      scale_fill_brewer(palette="Spectral")
 pca2
 ```
 ```{r}
-funbac.gdf.pam3 <- pam(funbac.gdf, k=3)
+sample.pam.cluster <- as.data.frame(funbac.gdf.pam$clustering)
+sample.pam.cluster$fmtID <- rownames(sample.pam.cluster)
+colnames(sample.pam.cluster)[1] <- "PAM.Cluster"
+
+funBac.pcs.df <- 
+  merge(f.MAG.mdf2,sample.pam.cluster,by="fmtID")
+
+P_PAM_counts <- ggplot(funBac.pcs.df,aes(x=PAM.Cluster,y=..count..)) + 
+  geom_bar(aes(fill=factor(PAM.Cluster)),color="grey25") +
+  scale_fill_brewer(palette="Spectral") +
+  facet_grid(Location~.,scale="free") + theme_bw()
+P_PAM_counts
+
+if(do.write){
+  ggsave("./output/P_PAM_counts.pdf",P_PAM_counts,width=3.8,height=6)
+}
+```
+
+```{r}
+pca4 <- autoplot(funbac.gdf.pam,data=as.data.frame(funbac.gdf),alpha=.3,
+               loadings=T,loadings.label=F,frame=T,frame.type="norm",
+               loadings.colour="black") + theme_bw()
+pca4
+```
+
+
+```{r}
+funbac.gdf.pamX <- pam(funbac.gdf, k=4)
 #plot(funbac.gdf.pam)
 
 #funBac.prf$taxid <- rownames(funBac.prf)
 
-pca3 <- autoplot(funbac.gdf.pam3,data=as.data.frame(funbac.gdf),alpha=.3,
+pcaX <- autoplot(funbac.gdf.pamX,data=as.data.frame(funbac.gdf),alpha=.3,
                loadings=T,loadings.label=T,frame=T,frame.type="norm",
                loadings.colour="black") + theme_bw()
-pca3
+pcaX
+```
+### prcomp
+```{r}
+sample.pamX.cluster <- as.data.frame(funbac.gdf.pamX$clustering)
+sample.pamX.cluster$fmtID <- rownames(sample.pamX.cluster)
+colnames(sample.pamX.cluster)[1] <- "PAM.Cluster"
+
+funBac.pcs <- prcomp(funBac.prf, center=T, scale.=T)
+plot(funBac.pcs,type="l")
+
+funBac.pcs.eig <- factoextra::fviz_eig(funBac.pcs)
+funBac.pcs.eig
+
+#AMR::ggplot_pca(funBac.pcs,choices = c(1,3),pc.biplot=F,ellipse=T)
+```
+
+```{r}
+factoextra::fviz_pca_var(funBac.pcs,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+```{r}
+funBac.pcs.df <- as.data.frame(funBac.pcs$rotation)
+funBac.pcs.df$fmtID <- rownames(funBac.pcs.df)
+funBac.pcs.df <- merge(
+  funBac.pcs.df[,c(1:10,ncol(funBac.pcs.df))],
+  merge(f.MAG.mdf2,sample.pamX.cluster,by="fmtID"),
+  by="fmtID",all.x=T)
+
+ggplot(funBac.pcs.df, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(color=Location))
+
+
+
+plot_ly(funBac.pcs.df, x=~PC1, y=~PC2, z= ~ PC3, 
+        color= ~factor(PAM.Cluster),
+        size=I(50),
+        shape=~Location)
+
+```
+#### PCA points
+```{r}
+funBac.pcs.df.tmp <- funBac.pcs.df[order(funBac.pcs.df$PC3),]
+exp.pc1 <- paste0("PC1(",round(funBac.pcs.eig$data$eig[1],2),"%)")
+exp.pc2 <- paste0("PC2(",round(funBac.pcs.eig$data$eig[2],2),"%)")
+exp.pc3 <- paste0("PC3(",round(funBac.pcs.eig$data$eig[3],2),"%)")
+
+p_pca_point <- ggplot(funBac.pcs.df.tmp,aes(x=PC1,y=PC2,size=PC3)) + 
+  geom_point(aes(fill=factor(PAM.Cluster)),shape=21,color="grey25") + 
+  scale_fill_brewer(palette="Spectral") +
+  theme_bw() + scale_size(range = c(-0.5, 5))
+
+p_pca_point2 <- p_pca_point + xlab(exp.pc1) + ylab(exp.pc2) + 
+  labs(size = exp.pc3,fill="PAM cluster")
+p_pca_point2
+if(do.write){
+  ggsave("./output/p_pca_point.pdf",p_pca_point2,width=6,height=5)
+}
+```
+```{r}
+ggplot(funBac.pcs.df,aes(x=PC1,y=PC3)) + 
+  geom_point(aes(color=factor(PAM.Cluster))) + theme_bw()
+```
+```{r}
+ggplot(funBac.pcs.df,aes(x=PC2,y=PC3)) + 
+  geom_point(aes(color=factor(PAM.Cluster))) + theme_bw()
+```
+### Try DMM
+```{r,eval=FALSE}
+library(DirichletMultinomial)
+save.image("tmp.RData")
 ```
 
 ### PCA loading
 ```{r}
+pca.cluster <- as.data.frame(funbac.gdf.pam$clustering)
+pca.cluster$fmtID <- rownames(pca.cluster)
+colnames(pca.cluster)[1] <- "PCA.cluster"
+
 loadings <- layer_data(pca2,3)
 loadings$v <- loadings$x^2+loadings$y^2
 loading <- loadings[rev(order(loadings$v)),]
 head(loading,11)
 ```
-### top11 taxons
+### Dominant taxon
+```{r}
+bin.euk.manual <- data.frame(
+  bin="None",
+  secondary_cluster="1",
+  user_genome="fungi.bin.1",
+  classification="d__Eukaryota;d1__Opisthokonta;k__Fungi;Dikarya; k1__Ascomycota; p__saccharomyceta; p1__Pezizomycotina; p2__leotiomyceta; p3__dothideomyceta; c__Dothideomycetes; c1__Dothideomycetidae; o__Myriangiales; f__Myriangiaceae; g__Myriangium;"
+)
+all.anno <- rbind(
+  rbind(bin.gtdbtk.bac120,bin.gtdbtk.ar53),
+  bin.euk.manual)
+
+dominant.class <- c("c__Nitrososphaeria","c__Nanoarchaeia","c__Gammaproteobacteria",
+                 "k__Fungi","c__Alphaproteobacteria","c__MSB-5A5")
+dominant.class.pattern <- 
+  c("c__Nitrososphaeria|c__Nanoarchaeia|c__Gammaproteobacteria|c__Alphaproteobacteria|c__MSB-5A5")
+```
+
+```{r}
+all.prf.mdf <- melt(as.matrix(funBac.prf))
+all.prf.mdf$value <- as.numeric(all.prf.mdf$value)
+pca.all.cluster <- as.data.frame(funbac.gdf.pam$clustering)
+pca.all.cluster$fmtID <- rownames(pca.all.cluster)
+colnames(pca.all.cluster)[1] <- "PCA.cluster"
+
+colnames(all.prf.mdf) <- c("MAGID","fmtID","FPKM")
+all.prf.mdf <- ddply(
+  all.prf.mdf,"MAGID",transform,
+  occ=length(which(FPKM>0))/length(FPKM))
+dominant.anno <- all.anno%>%filter(grepl(dominant.class.pattern,classification,perl = T))
+
+ggplot(unique(all.prf.mdf[,c("MAGID","occ")]),aes(x=occ)) + geom_density()
+```
+```{r}
+ggplot(all.prf.mdf,aes(x=occ,y=FPKM)) + geom_density2d()
+
+```
+
+```{r}
+dominant.MAGID <- unique((all.prf.mdf%>%filter(occ>0.75))$MAGID)
+```
+
+### Top 10 taxons
 
 Additional fungi:
 d__Eukaryota; d1__Opisthokonta; k__Fungi; Dikarya; k1__Ascomycota; p__saccharomyceta; p1__Pezizomycotina; p2__leotiomyceta; p3__dothideomyceta; c__Dothideomycetes; c1__Dothideomycetidae; o__Myriangiales; f__Myriangiaceae; g__Myriangium;
 
 ```{r}
-top11.taxon <- loading[1:11,c("label","x","y")]
-top11.taxon$domain <- c(rep("Archaea",3),"Eukaryota",rep("Archaea",3),
-                        rep("Bacteria",3),"Archaea")
-top11.taxon$class <- c("Nitrososphaeria","Nanoarchaeia","Nanoarchaeia","Dothideomycetes",
+top10.taxon <- loading[1:10,c("label","x","y")]
+top10.taxon$domain <- c(rep("Archaea",3),"Eukaryota",rep("Archaea",3),
+                        rep("Bacteria",3))
+top10.taxon$class <- c("Nitrososphaeria","Nanoarchaeia","Nanoarchaeia","Dothideomycetes",
                        rep("Nitrososphaeria",3),"Gammaproteobacteria",
-                       "Alphaproteobacteria","Zixibacteria;MSB-5A5","Nitrososphaeria")
-top11.taxon$contributes <- seq(1,11)
-top11.taxon$taxon <- factor(
-  paste0("top",top11.taxon$contributes,":",top11.taxon$class,":",top11.taxon$MAGID),
-  levels=paste0("top",top11.taxon$contributes,":",top11.taxon$class,":",top11.taxon$MAGID))
+                       "Alphaproteobacteria","Zixibacteria;MSB-5A5")
+top10.taxon$sp <- c(
+  "DRGT01 sp016838795", "PSPM01 sp.", "JACPIM01 sp.", "Myriangium sp.",
+  "Nitrosopumilus sp013390905", "DRGT01 sp.", "Nitrosopumilaceae sp.",
+  "SMWN01 sp004356415", "Alphaproteobacteria sp.", "B120-G9 sp."
+)
+top10.taxon$contributes <- seq(1,10)
+paste.taxons <- paste0(
+  "Top",top10.taxon$contributes,":",top10.taxon$label,"\n",top10.taxon$sp)
+
+top10.taxon$taxon <- factor(paste.taxons,levels=paste.taxons)
 
 
-top11.prf.mdf <- melt(
-  as.matrix(funBac.prf[which(rownames(funBac.prf)%in%top11.taxon$label),]))
-top11.prf.mdf$value <- as.numeric(top11.prf.mdf$value)
-pca.11.cluster <- as.data.frame(funbac.gdf.pam$clustering)
-pca.11.cluster$fmtID <- rownames(pca.11.cluster)
-colnames(pca.11.cluster)[1] <- "PCA.cluster"
+top10.prf.mdf <- melt(
+  as.matrix(funBac.prf[which(rownames(funBac.prf)%in%top10.taxon$label),]))
+top10.prf.mdf$value <- as.numeric(top10.prf.mdf$value)
+pca.10.cluster <- as.data.frame(funbac.gdf.pam$clustering)
+pca.10.cluster$fmtID <- rownames(pca.10.cluster)
+colnames(pca.10.cluster)[1] <- "PAM.Cluster"
 
-colnames(top11.prf.mdf) <- c("MAGID","fmtID","FPKM")
+colnames(top10.prf.mdf) <- c("MAGID","fmtID","FPKM")
 
-top11.mdf <- merge(
-  merge(top11.prf.mdf,top11.taxon,by.x="MAGID",by.y="label"),
-  merge(f.MAG.mdf2,pca.cluster,by="fmtID"),by="fmtID") 
+top10.mdf <- merge(
+  merge(top10.prf.mdf,top10.taxon,by.x="MAGID",by.y="label"),
+  merge(f.MAG.mdf2,pca.10.cluster,by="fmtID"),by="fmtID") 
 ```
 
 
 ```{r,warning=F}
-ggplot(top11.mdf,aes(x=FPKM)) + geom_density(aes(color=factor(PCA.cluster))) +
+ggplot(top10.mdf,aes(x=FPKM)) + geom_density(aes(color=factor(PAM.Cluster))) +
   facet_wrap(~taxon,scales="free") + scale_x_log10() + theme_bw()
 ```
+#### Top10 FPKM
 ```{r,warning=F}
-ggplot(top11.mdf,aes(x=Location.Notes,y=FPKM)) + geom_boxplot(aes(fill=Location.Notes)) +
+top10.mdf$Mar.location[which(is.na(top10.mdf$Mar.location))] <- ""
+top10.mdf$combine.location <- as.factor(paste0(top10.mdf$Location,top10.mdf$Mar.location))
+levels(top10.mdf$combine.location) <- c(
+  "Mar.Trench","Mar.TrenchBottom","Mar.TrenchSouth","Mar.TrenchNorth","Yap",
+  "Phi.Basin.South","Phi.Basin.North")
+
+top10.mdf$class <- reorder(top10.mdf$class,-top10.mdf$contributes,sum)
+
+my_comparisons <- list(
+  c(1,2),c(1,3),c(1,4),c(1,5),
+  c(2,3),c(2,4),c(2,5),
+  c(3,4),c(3,5),c(4,5)
+)
+
+p_top10_fpkm <- ggplot(top10.mdf,
+       aes(x=factor(PAM.Cluster),y=FPKM)) + 
+  geom_boxplot(aes(fill=factor(PAM.Cluster))) +
+  scale_fill_brewer(palette="Spectral") +
+  facet_grid(~taxon,scales="free",space="free") + 
+  ggpubr::stat_compare_means(label="p.format")+
+  #stat_compare_means(label="p.signif",comparisons=my_comparisons) +
+  theme_bw()
+
+
+p_top10_fpkm_lg <- ggplot(top10.mdf,
+       aes(x=factor(PAM.Cluster),y=FPKM)) + 
+  geom_boxplot(aes(fill=factor(PAM.Cluster))) +
+  scale_fill_brewer(palette="Spectral") +
+  scale_y_log10() + 
+  #annotation_logticks(side="l",outside=T) + coord_cartesian(clip = "off") +
+  facet_grid(~taxon,scales="free",space="free") + 
+  #stat_compare_means(label="p.signif") +
+  ggpubr::stat_compare_means(label="p.signif") +
+  theme_bw() + ylab("log2(FPKM)")
+
+p_top10_fpkm
+p_top10_fpkm_lg
+
+if(do.write){
+  ggsave(filename = "./output/p_top10_fpkm.pdf",
+         p_top10_fpkm_lg,width = 16,height=3)
+}
+```
+
+```{r,warning=F}
+ggplot(top10.mdf%>%filter(combine.location!="Mar.Trench"),
+       aes(x=combine.location,y=FPKM)) + 
+  geom_boxplot(aes(fill=combine.location)) +
+  scale_fill_brewer(palette="Spectral") +
+  facet_grid(~class,scales="free",space="free") + scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_text(angle = -45,hjust=0))
+```
+
+```{r}
+top10.mdf$taxon2 <- as.factor(paste0(top10.mdf$class,"(",top10.mdf$MAGID,")"))
+top10.mdf$taxon2 <- reorder(top10.mdf$taxon2,-top10.mdf$contributes,sum)
+ggplot(top10.mdf%>%filter(combine.location!="Mar.Trench"&class=="Nitrososphaeria"),
+       aes(x=combine.location,y=FPKM)) + 
+  geom_boxplot(aes(fill=combine.location)) + 
+  facet_grid(taxon~class,switch = "y") + 
+  scale_y_log10(breaks=10^seq(-4,2,2)) + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_text(angle = -45,hjust=0))
+```
+```{r}
+top10.mdf$layers <- top10.mdf$LayerDepth - top10.mdf$LayerHeigth/2
+ggplot(top10.mdf%>%filter(combine.location!="Mar.Trench"&class=="Nitrososphaeria"),
+       aes(x=combine.location,y=FPKM)) + 
+  geom_boxplot(aes(fill=combine.location)) + 
+  facet_grid(taxon~layers,switch = "y") + 
+  scale_y_log10(breaks=10^seq(-4,2,2)) + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_text(angle = -45,hjust=0))
+```
+
+
+```{r,warning=F,eval=FALSE}
+top10.mdf$loc3D <- paste(top10.mdf$Longitude,top10.mdf$Latitude,top10.mdf$Depth,sep=".")
+ggplot(top10.mdf%>%filter(grepl("南坡",Location.Notes)&No.dive=="FDZ066"),
+       aes(x=interaction(pushcore,loc3D),y=FPKM)) +
+  geom_boxplot(aes(fill=interaction(pushcore,loc3D))) +
+  geom_jitter() + stat_compare_means() +
   facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_blank())
+
+ggplot(top10.mdf%>%filter(grepl("南坡",Location.Notes)&No.dive=="FDZ069"),
+       aes(x=interaction(pushcore,loc3D),y=FPKM)) +
+  geom_boxplot(aes(fill=interaction(pushcore,loc3D))) +
+  geom_jitter() + stat_compare_means() +
+  facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_blank())
+
+```
+### Top 20 taxons
+```{r}
+top20.taxon <- loading[1:20,c("label","x","y")]
+all.genome <- c(MAG.represent$user_genome,"fungi.bin.1")
+
+top20.anno <- all.anno%>%filter(
+  secondary_cluster%in%top20.taxon$label &
+    user_genome %in% all.genome)
+
+top20.anno2 <- strsplit(top20.anno$classification,";")
+top20.taxon$domain <- sapply(top20.anno2,"[",1)
+top20.taxon$class <- sapply(top20.anno2,"[",3)
+top20.taxon$genus <- sapply(top20.anno2,"[",6)
+top20.taxon$species <- sapply(top20.anno2,"[",7)
+
+top20.prf.mdf <- melt(
+  as.matrix(funBac.prf[which(rownames(funBac.prf)%in%top20.taxon$label),]))
+top20.prf.mdf$value <- as.numeric(top20.prf.mdf$value)
+pca.20.cluster <- as.data.frame(funbac.gdf.pam$clustering)
+pca.20.cluster$fmtID <- rownames(pca.20.cluster)
+colnames(pca.20.cluster)[1] <- "PCA.cluster"
+
+colnames(top20.prf.mdf) <- c("MAGID","fmtID","FPKM")
+
+top20.mdf <- merge(
+  merge(top20.prf.mdf,top20.taxon,by.x="MAGID",by.y="label"),
+  merge(f.MAG.mdf2,pca.20.cluster,by="fmtID"),by="fmtID") 
+```
+
+
+```{r,warning=F}
+ggplot(top20.mdf,aes(x=FPKM)) + geom_density(aes(color=factor(PCA.cluster))) +
+  facet_wrap(~class,scales="free") + scale_x_log10() + theme_bw()
+```
+```{r,warning=F}
+top20.mdf$Mar.location[which(is.na(top20.mdf$Mar.location))] <- ""
+
+ggplot(top20.mdf,aes(x=interaction(Mar.location,Location),y=FPKM)) + 
+  geom_boxplot(aes(fill=MAGID)) +
+  facet_wrap(~domain+class,scales="free") + scale_y_log10() + theme_bw() +
   theme(text=element_text(family="STHeiti"),axis.text.x = element_text(angle = -90,hjust=0))
 ```
-```{r,warning=F}
-top11.mdf$loc3D <- paste(top11.mdf$Longitude,top11.mdf$Latitude,top11.mdf$Depth,sep=".")
-ggplot(top11.mdf%>%filter(grepl("南坡",Location.Notes)&No.dive=="FDZ066"),
-       aes(x=interaction(pushcore,loc3D),y=FPKM)) +
-  geom_boxplot(aes(fill=interaction(pushcore,loc3D))) +
-  geom_jitter() + stat_compare_means() +
-  facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
-  theme(text=element_text(family="STHeiti"),axis.text.x = element_blank())
-
-ggplot(top11.mdf%>%filter(grepl("南坡",Location.Notes)&No.dive=="FDZ069"),
-       aes(x=interaction(pushcore,loc3D),y=FPKM)) +
-  geom_boxplot(aes(fill=interaction(pushcore,loc3D))) +
-  geom_jitter() + stat_compare_means() +
-  facet_wrap(~taxon,scales="free") + scale_y_log10() + theme_bw() +
-  theme(text=element_text(family="STHeiti"),axis.text.x = element_blank())
-
-```
-### Cor with bac
+氨氧化古菌的MAGs很多，丰度差异大。其他优势菌菌株比较固定。
 ```{r}
-bac.metadata.df <- top10.mdf%>%filter(grepl("top1:",taxon))
-bac.metadata.df <- bac.metadata.df[,c(1,25:28)]
+ggplot(top20.mdf%>%filter(class=="c__Nitrososphaeria")) + 
+  geom_boxplot(aes(x=MAGID,y=FPKM+1e-7,fill=MAGID)) +
+  facet_wrap(~interaction(Mar.location,Location),scales="free_x") + 
+  scale_y_log10() + theme_bw() +
+  theme(text=element_text(family="STHeiti"),axis.text.x = element_text(angle = -90,hjust=0))
+```
+
+
+
+
+
+
+### Global heatmap
+```{r}
+
+bac.metadata.df <- top10.mdf%>%filter(grepl("Top1:",taxon))
+bac.metadata.df <- bac.metadata.df[,c(1,ncol(bac.metadata.df)-3:0)]
 
 f.MAG.mdf3 <- merge(bac.metadata.df,f.MAG.mdf2,by="fmtID")
+
+f.MAG.mdf3$Mar.location[which(is.na(f.MAG.mdf3$Mar.location))] <- ""
+f.MAG.mdf3$combine.location <- as.factor(paste0(f.MAG.mdf3$Location,f.MAG.mdf3$Mar.location))
+levels(f.MAG.mdf3$combine.location) <- c(
+  "Mar.Trench","Mar.TrenchBottom","Mar.TrenchSouth","Mar.TrenchNorth","Yap",
+  "Phi.Basin.South","Phi.Basin.North")
+
+f.MAG.mdf3$layers <- f.MAG.mdf3$LayerDepth-f.MAG.mdf3$LayerHeigth/2
+```
+
+
+```{r}
+if(file.exists("funBac.prf.RData")){
+  load("funBac.prf.RData")
+}else{
+  funBac.all.cor <- cor(funBac.prf,method="s")
+  save(funBac.prf,funBac.all.cor,file = "funBac.prf.RData")
+}
+represent.metadata.df <- f.MAG.mdf3%>%
+  filter(layers==2&combine.location!="Mar.Trench")
+rownames(represent.metadata.df) <- represent.metadata.df$fmtID
+
+represent.MAGID <- represent.metadata.df$fmtID
+
+pheatmap(funBac.all.cor,
+         annotation_col = represent.metadata.df[,c("combine.location"),F])
+```
+
+#### heatmap(occ > 20 )
+```{r}
+MAG.occ.df <- unique(all.prf.mdf[,c("MAGID","occ")])
+ggplot(MAG.occ.df,aes(x=occ)) + geom_density()
 ```
 
 ```{r}
-funBac.top.prf <- funBac.prf[which(rownames(funBac.prf)%in%loading$label[1:11]),]
-funBac.top.cor <- cor(t(funBac.top.prf),method="s")
+all.prf.mdf
+all.taxon <- loading
 
-pheatmap(funBac.top.cor,display_numbers = T)
+pick.all.anno <- all.anno%>%filter(bin%in%c(binmap.tsv$bin,"None"))
+pick.tmp <- strsplit(pick.all.anno$classification,";")
+pick.all.anno$class <- sapply(pick.tmp,"[",3)
+pick.all.anno$domain <- sapply(pick.tmp,"[",1)
+
+rownames(pick.all.anno) <- pick.all.anno$secondary_cluster
+pick.all.anno <- pick.all.anno[all.taxon$label,]
+pick.all.anno$dominantClass <- ifelse(pick.all.anno$class%in%dominant.class,
+                                  pick.all.anno$class,"Others")
+
+funBac.lg10.prf <- log10(funBac.prf+1e-9)
+all.MAGID <- colnames(funBac.lg10.prf)
+
+
+represent.d0.metadata.df <- merge(
+  f.MAG.mdf3,sample.pam.cluster,by="fmtID")%>%
+  filter(
+    layers%in%seq(0,30) & 
+    combine.location!="Mar.Trench" & 
+    
+    fmtID%in%colnames(funBac.lg10.prf))
+
+represent.d0.metadata.df$mDepth <- -represent.d0.metadata.df$Depth
+represent.d0.MAGID <- represent.d0.metadata.df$fmtID
+rownames(represent.d0.metadata.df) <- represent.d0.metadata.df$fmtID
+represent.d0.metadata.df$PAM.C <- paste0("C",represent.d0.metadata.df$PAM.Cluster.y)
+
+pheatmap(
+  funBac.lg10.prf[all.taxon$label,represent.d0.MAGID],
+  color=colorRampPalette(rev((brewer.pal(n = 11, name ="RdBu"))[3:9]))(100),
+  #color=wes_palette("Zissou1", 100, type = "continuous"),
+  #color=colorRampPalette(rev((redmonder.pal(11, "dPBIRdBu"))[3:9]))(100),
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  annotation_col = represent.d0.metadata.df[,c("PAM.C","layers","mDepth","Location"),F],
+  show_colnames = F,
+  annotation_row = pick.all.anno[,c("dominantClass"),F],
+  filename = "./output/global.pheatmap.pdf",width = 12,height=8,
+  border_color=NA,fontsize=4
+)
+
 ```
+### Top heatmapx
+```{r}
+top100.taxon <- loading[1:100,c("label","x","y")]
+top100.anno <- all.anno%>%filter(secondary_cluster%in%top100.taxon$label)
+top100.tmp <- strsplit(top100.anno$classification,";")
+top100.anno$class <- sapply(top100.tmp,"[",3)
+top100.anno$domain <- sapply(top100.tmp,"[",1)
+
+top100.anno <- unique(top100.anno[,c("secondary_cluster","domain","class")])
+rownames(top100.anno) <- top100.anno$secondary_cluster
+top100.anno <- top100.anno[top100.taxon$label,]
+top100.anno$dominantClass <- ifelse(top100.anno$class%in%dominant.class,
+                                  top100.anno$class,"Others")
+
+funBac.lg10.prf <- log10(funBac.prf+1e-9)
+
+
+represent.d0.metadata.df <- (merge(
+  f.MAG.mdf3,pca.cluster,by="fmtID"))%>%
+  filter(layers%in%seq(0,30)&combine.location!="Mar.Trench")
+
+represent.d0.metadata.df$mDepth <- -represent.d0.metadata.df$Depth
+rownames(represent.d0.metadata.df) <- represent.d0.metadata.df$fmtID
+represent.d0.MAGID <- represent.d0.metadata.df$fmtID
+represent.d0.metadata.df$PCA <- paste0("C",represent.d0.metadata.df$PCA.cluster)
+
+pheatmap(
+  funBac.lg10.prf[top100.taxon$label,represent.d0.MAGID],
+  color=colorRampPalette(rev((brewer.pal(n = 11, name ="RdBu"))[3:9]))(100),
+  #color=wes_palette("Zissou1", 100, type = "continuous"),
+  #color=colorRampPalette(rev((redmonder.pal(11, "dPBIRdBu"))[3:9]))(100),
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  annotation_col = represent.d0.metadata.df[,c("mDepth","layers","PCA","Location"),F],
+  annotation_row = top100.anno[,c("dominantClass"),F],
+  #filename = "./global.pheatmap.pdf",width = 12,height=8,
+  border_color=NA
+)
+#load("tmp.RData")
+```
+
+```{r}
+represent.d2.metadata.df <- f.MAG.mdf3%>%
+  filter(layers%in%c(0,2,4,6,8,10)&combine.location!="Mar.Trench")
+
+represent.d2.metadata.df$mDepth <- -represent.d2.metadata.df$Depth
+rownames(represent.d2.metadata.df) <- represent.d2.metadata.df$fmtID
+represent.d2.MAGID <- represent.d2.metadata.df$fmtID
+
+pheatmap(
+  funBac.lg10.prf[top100.taxon$label,represent.d2.MAGID],
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "manhattan",
+  annotation_col = represent.d0.metadata.df[,c("mDepth","Location"),F],
+  annotation_row = top100.anno[,c("dominantClass"),F],
+)
+```
+
+
+```{r}
+if(file.exists("funBac.allSamples.cor.RData")){
+  load("funBac.allSamples.cor.RData")
+}else{
+  #save(funBac.prf,file="funBac.prf.RData")
+  funBac.allSamples.cor <- cor(funBac.prf,method="s")
+  save(funBac.allSamples.cor,file="funBac.allSamples.cor.RData")
+}
+
+
+pheatmap(funBac.allSamples.cor,display_numbers = T)
+
+```
+### Cor with shannon
 ```{r}
 library(ggpmisc)
+
 ggplot(f.MAG.mdf3,aes(x=TheFungi.MAG,y=MAG.shannon)) + 
   geom_point(aes(color=MMRatioGroup)) + facet_wrap(~Location) +
   stat_smooth(method = "lm", se = TRUE) +
@@ -516,11 +1066,39 @@ ggplot(f.MAG.mdf3,aes(x=TheFungi.MAG,y=MAG.shannon)) +
   xlab("FPKM of The Fungi") +
   ylab("prokaryotic microbiome shannon index")
 ```
+```{r}
+fit.data1 <- data.frame(
+  x=10^seq(-3,2,0.01),
+  y=6-0.05*(10^seq(-3,2,0.01))
+)
+fit.data2 <- data.frame(
+  x=10^seq(-3,2,0.01),
+  y=10-0.2*(10^seq(-3,2,0.01))
+)
+
+p_fungi_shannon_cor <- ggplot(f.MAG.mdf3[order(f.MAG.mdf3$Location),],
+                              aes(x=TheFungi.MAG,y=MAG.shannon)) + 
+  geom_point(aes(fill=Location),shape=21,color="grey25",stroke=0.3) + 
+  geom_line(data=fit.data1%>%filter(y>0.0&x>0.005),
+            aes(x=x,y=y),linetype=2,color="firebrick",size=1) +
+  scale_fill_brewer(palette="Set2") +
+  #stat_smooth(method = "lm", se = TRUE) +
+  #stat_cor(label.y=0,method="spearman") +
+  scale_x_log10() + ylim(c(0,7)) +
+  annotation_logticks(side="b") + stat_cor() +
+  theme_bw() + xlab("FPKM of The Fungi (log10 scale)") +
+  ylab("prokaryotic microbiome shannon index")
+p_fungi_shannon_cor
+
+if(do.write){
+  ggsave("./output/p_fungi_shannon_cor.pdf",p_fungi_shannon_cor,width=5,height=5)
+}
+```
 
 ## PERMANOVA
 
 
-```{r}
+```{r,eval=FALSE}
 select.vars <- c("fmtID","Depth","Longitude","Latitude","Collector",
                  "No.dive","Collect_loc","LayerDepth","LayerHeigth","day",
                  "TheFungi.MAG","TheFungi.Mitochondrion","ratio")
