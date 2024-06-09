@@ -1,0 +1,4 @@
+outs:
+- md5: a79d98a40777a0fd32c6a70794a74663
+  size: 34707117953
+  path: all_passed_bins.rename.fasta.gz
