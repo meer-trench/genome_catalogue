@@ -1,0 +1,153 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(tidyverse)
+library(dplyr)
+library(FSA)
+setwd("meerv2.1")
+```
+
+## Profile Statistics
+
+```{r}
+metadata <- read.table("1174_metadata.tsv",sep = "\t",header = T,check.names = F,row.names = 1)
+```
+
+
+```{r}
+
+f <- function(x){ #turn htest to df
+  df=x[1] %>% as.data.frame() %>% bind_cols(x[3])
+  colnames(df)[1] <- rownames(df)[1]
+  rownames(df)<-""
+  return(df)
+}
+
+length(metadata$group)
+```
+
+
+## All SGB statistics
+
+```{r}
+
+all_sgb_fpkm <- read.table("meerv2.1/meer_rv2.rpkm.tsv",header = T,check.names = F,row.names = 1)
+
+```
+
+```{r}
+
+all_sgb_fpkm[,colSums(all_sgb_fpkm)>0] %>% ncol()
+all((metadata %>% rownames())%in%(all_sgb_fpkm %>% colnames()))
+all_sgb_fpkm <- all_sgb_fpkm[rownames(metadata)]
+metadata %>% filter(group=='') 
+
+metadata %>% mutate(group2=case_when(
+  group=="" ~ 'MT',
+  .default=group
+)) ->metadata
+```
+
+```{r}
+colnames(all_sgb_fpkm_t) |>
+  map(\(x) kruskal.test(all_sgb_fpkm_t[,x],as.factor(metadata$group2))) |>
+  map(f) |>
+  bind_rows() %>% mutate(StGB=colnames(all_sgb_fpkm_t)) %>% remove_rownames() ->sgb_kw
+sgb_kw$p.value <- p.adjust(sgb_kw$p.value,method="BH")
+```
+
+```{r}
+sgb_kw %>% head()
+
+```
+
+
+```{r}
+kw_dunn <- function(x,g){
+  
+  tapply(rank(x), g, mean,simplify = FALSE) %>% t %>% as.data.frame() -> mean_rank
+  dunnTest(x,g,method = "bh")$res %>% select(Comparison,P.adj) %>% t %>% as.data.frame() ->dunn_res
+  colnames(dunn_res) <- dunn_res["Comparison",]
+  dunn_res <- dunn_res[-1,]
+  return(bind_cols(mean_rank,dunn_res) %>% remove_rownames())
+}
+all_sgb_fpkm_t <- t(all_sgb_fpkm)
+colnames(all_sgb_fpkm_t) |> 
+  map(\(x) kw_dunn(all_sgb_fpkm_t[,x],metadata$group2))|>
+  bind_rows() %>% apply(.,2,as.numeric)  %>% as.data.frame() -> sig_sgb_location_dunn
+rownames(sig_sgb_location_dunn) <- rownames(all_sgb_fpkm)
+```
+
+```{r}
+head(sig_sgb_location_dunn)
+
+```
+```{r}
+sig_sgb_location_dunn[,1:4] -> df
+mean_rank_max_location %>% head
+rownames(mean_rank_max_location) |>
+ map(\(x) any(select(df[x,],-mean_rank_max_location[x,'Location'])==df[x,mean_rank_max_location[x,'Location']])) %>%
+ bind_cols() ->a
+names(a) <- rownames(mean_rank_max_location)
+#any(select(df['FDZ031YE0-5.bin.230',],-mean_rank_max_location['FDZ031YE0-5.bin.230','Location'])==df['FDZ031YE0-5.bin.230',mean_rank_max_location['FDZ031YE0-5.bin.230','Location']])
+```
+
+
+```{r}
+sig_sgb_location_dunn[,1:7]  %>%
+apply(.,1,which.max) %>% map_chr(\(x) colnames(sig_sgb_location_dunn)[x]) %>% as.data.frame() ->mean_rank_max_location
+colnames(mean_rank_max_location) <- 'Location'
+rownames(mean_rank_max_location) %>% map(\(x) sum(sig_sgb_location_dunn[x,grep(mean_rank_max_location[x,"Location"],colnames(sig_sgb_location_dunn))][-1] <0.05)) %>% bind_cols() ->sig_sgb_location_sig_count
+sig_sgb_location_sig_count <- sig_sgb_location_sig_count %>% t %>% as.vector()
+names(sig_sgb_location_sig_count) <- rownames(mean_rank_max_location)
+mean_rank_max_location %>% mutate(Sig_Count=sig_sgb_location_sig_count) %>% mutate(Location=case_when(Sig_Count <21 ~ 'NS',.default = Location)) %>% select(Location) ->plot_location
+plot_location <- plot_location %>% rownames_to_column(var='SGB')
+
+write_tsv(x =plot_location ,"./SGB_locations.tsv")
+```
+
+
+```{r}
+#metadata$LayerGroup
+colnames(all_sgb_fpkm_t) |>
+  map(\(x) kruskal.test(all_sgb_fpkm_t[,x],as.factor(metadata$LayerGroup))) |>
+  map(f) |>
+  bind_rows() %>% mutate(StGB=colnames(all_sgb_fpkm_t)) %>% remove_rownames() ->sgb_layergroup_kw
+sgb_layergroup_kw$p.value <- p.adjust(sgb_layergroup_kw$p.value)
+```
+
+```{r}
+all_sgb_fpkm_layer=all_sgb_fpkm_t[rownames(metadata %>% filter(LayerGroup!="")),]
+colnames(all_sgb_fpkm_layer) |> 
+  map(\(x) kw_dunn(all_sgb_fpkm_layer[,x],metadata[rownames(metadata %>% filter(LayerGroup!="")),'LayerGroup']))|>
+  bind_rows() %>% apply(.,2,as.numeric)  %>% as.data.frame() -> sig_sgb_layer_dunn
+rownames(sig_sgb_layer_dunn) <- rownames(all_sgb_fpkm)
+```
+
+```{r}
+sig_sgb_layer_dunn[,1:4] -> df2
+mean_rank_max_layer %>% head
+rownames(mean_rank_max_layer) |>
+ map(\(x) any(select(df2[x,],-mean_rank_max_layer[x,'LayerGroup']) == df2[x,mean_rank_max_layer[x,'LayerGroup']])) %>%
+ bind_cols() ->b
+names(b) <- rownames(mean_rank_max_layer)
+
+select(df2[rownames(mean_rank_max_layer)[1],],-mean_rank_max_layer[rownames(mean_rank_max_layer)[1],'LayerGroup']) ==df2[rownames(mean_rank_max_layer)[1],mean_rank_max_layer[rownames(mean_rank_max_layer)[1],'LayerGroup']]
+
+```
+```{r}
+sig_sgb_layer_dunn[,1:4]  %>%
+apply(.,1,which.max) %>% map_chr(\(x) colnames(sig_sgb_layer_dunn)[x]) %>% as.data.frame() ->mean_rank_max_layer
+colnames(mean_rank_max_layer) <- 'LayerGroup'
+# sig_sgb_layer_dunn %>% apply(.,2,as.numeric)  %>% as.data.frame() -> sig_sgb_layer_dunn
+# rownames(sig_sgb_layer_dunn) <- rownames(all_sgb_fpkm)
+rownames(mean_rank_max_layer) %>% map(\(x) sum(sig_sgb_layer_dunn[x,grep(mean_rank_max_layer[x,"LayerGroup"],colnames(sig_sgb_layer_dunn),fixed=T)][-1] <0.05)) %>% bind_cols() ->sig_sgb_layer_sig_count
+sig_sgb_layer_sig_count <- sig_sgb_layer_sig_count %>% t %>% as.vector()
+names(sig_sgb_layer_sig_count) <- rownames(mean_rank_max_layer)
+mean_rank_max_layer %>% mutate(Sig_Count=sig_sgb_layer_sig_count) %>% mutate(LayerGroup=case_when(Sig_Count <2 ~ 'NS',.default = LayerGroup)) %>% select(LayerGroup) ->plot_layer
+plot_layer <- plot_layer %>% rownames_to_column(var='SGB')
+write_tsv(x =plot_layer ,"./SGB_layergroup.tsv")
+```
+
