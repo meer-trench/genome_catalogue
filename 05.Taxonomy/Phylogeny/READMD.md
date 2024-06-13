@@ -12,8 +12,8 @@ Firstly, markers from Species-level Genome Bins (SGBs) were identified and condu
 gtdbtk identify --batchfile MEER_SGB.list --out_dir bin_ca_tetra_r220 --cpus 64 -x fa
 gtdbtk align --identify_dir bin_ca_tetra_r220/ --out_dir bin_ca_tetra_r220/ --cpus 64
 ```
-Generate trimmed msa for Archaea(ar53) and Bacteria(bac120).
 
+Generate trimmed msa for Archaea(ar53) and Bacteria(bac120).
 
 ## Build Archaea(ar53) and Bacteria(bac120) tree separately  
 
