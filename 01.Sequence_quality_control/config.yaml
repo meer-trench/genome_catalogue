@@ -1,0 +1,9 @@
+# Parameters for qc
+# project: project/
+phred: 33
+sequencer: mgi
+adaptors: # There are adaptors for DNBSeq
+    r1: AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA
+    r2: AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG
+project: tst_cluster/
+raw: /path/to/your/raw_sequences/
